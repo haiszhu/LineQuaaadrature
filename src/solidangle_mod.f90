@@ -1,0 +1,331 @@
+module solidangle_mod
+  use linequaaadrature_mod
+  implicit none
+
+contains
+
+  ! ------------------------------------------------------------------
+  ! evaluate_solid_angle_integral_r64
+  ! Inputs:
+  !   m           : number of target points
+  !   tx(3,m)     : target positions
+  !   n           : number of source quadrature nodes (VR grid size)
+  !   sx(3,n)     : source positions
+  !   snx(3,n)    : source normals (used for qhat)
+  !   sw(n)       : source weights
+  !   r_vert(3,3) : triangle vertices for circumcircle transform
+  !   nbd         : number of boundary quad nodes (= 3*nquad)
+  !   sxbd_in(3,nbd) : analytic boundary positions at GL nodes
+  !   IalphaAsvestas(m) : output solid angle values
+  ! ------------------------------------------------------------------
+  subroutine evaluate_solid_angle_integral_r64(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+    use koorn_geom_mod, only: circumcircle_transform_3d
+    use lq_kernel_mod,  only: line_kernel_eval_r64, line_quad_compress_r64
+    use iso_c_binding,  only: c_funptr, c_funloc
+    integer(8),  intent(in)    :: m, n, nbd
+    real(r64),   intent(in)    :: tx(3,m), sx(3,n), snx(3,n), sw(n)
+    real(r64),   intent(in)    :: r_vert(3,3), sxbd_in(3,nbd)
+    real(r64),   intent(inout) :: IalphaAsvestas(m)
+
+    integer(8) :: nquad, sbdnp
+    integer(8) :: j, k, ell, idx_start, idx_end
+    real(r64)  :: alpha, qhat(3), qnrm, R(3,3), c(3)
+    real(r64)  :: templ, tempr, denoml, denomr, tgll, tglr
+    real(r64)  :: sxp(3)
+    type(c_funptr) :: cfptr
+
+    real(r64), allocatable :: tgl(:), wgl(:), Dgl(:,:)
+    real(r64), allocatable :: w_bclag(:)
+    real(r64), allocatable :: Legmat(:,:), vtmp(:,:)
+    real(r64), allocatable :: txnew(:,:), snxnew(:,:), sxpbd(:,:)
+    real(r64), allocatable :: sxbd(:,:), stangbd(:,:), sspbd(:)
+    real(r64), allocatable :: kdata(:,:)
+    real(r64), allocatable :: funvals(:,:,:), sxbdw(:,:,:)
+    real(r64), allocatable :: bclagmatlr(:,:)
+
+    sbdnp = 3_8
+    nquad = nbd / sbdnp
+
+    allocate(tgl(nquad), wgl(nquad), Dgl(nquad,nquad))
+    allocate(w_bclag(nquad))
+    allocate(Legmat(nquad,nquad), vtmp(nquad,nquad))
+    allocate(txnew(3,m), snxnew(3,n), sxpbd(3,nbd))
+    allocate(sxbd(3,nbd), stangbd(3,nbd), sspbd(nbd))
+    allocate(kdata(3,m))
+    allocate(funvals(nquad,sbdnp,m), sxbdw(nquad,sbdnp,m))
+    allocate(bclagmatlr(nquad,2))
+
+    ! --- GL quadrature ---
+    call gauss_r64(nquad, tgl, wgl, Dgl)
+    call bclaginterpweights_r64(nquad, tgl, w_bclag)
+    call legeexps_r64(2_8, nquad, tgl, Legmat, vtmp, wgl)
+
+    ! --- bclagmatlr: barycentric interp weights at endpoints -1, +1 ---
+    tgll = -1.0_r64;  tglr = 1.0_r64
+    denoml = 0.0_r64;  denomr = 0.0_r64
+    do k = 1, nquad
+      templ = w_bclag(k) / (tgll - tgl(k))
+      tempr = w_bclag(k) / (tglr - tgl(k))
+      bclagmatlr(k,1) = templ
+      bclagmatlr(k,2) = tempr
+      denoml = denoml + templ
+      denomr = denomr + tempr
+    end do
+    bclagmatlr(:,1) = bclagmatlr(:,1) / denoml
+    bclagmatlr(:,2) = bclagmatlr(:,2) / denomr
+
+    ! --- copy analytic sxbd, compute stangbd = Dgl*sxbd_ell / |Dgl*sxbd_ell| ---
+    sxbd = sxbd_in
+    do ell = 1, sbdnp
+      idx_start = (ell-1)*nquad + 1
+      idx_end   = ell*nquad
+      do k = 1, nquad
+        sxp(1) = sum(Dgl(k,:) * sxbd(1, idx_start:idx_end))
+        sxp(2) = sum(Dgl(k,:) * sxbd(2, idx_start:idx_end))
+        sxp(3) = sum(Dgl(k,:) * sxbd(3, idx_start:idx_end))
+        sspbd(idx_start+k-1) = sqrt(sxp(1)**2 + sxp(2)**2 + sxp(3)**2)
+        stangbd(:, idx_start+k-1) = sxp / sspbd(idx_start+k-1)
+      end do
+    end do
+
+    ! --- circumcircle transform ---
+    R = 0.0_r64;  c = 0.0_r64;  alpha = 0.0_r64
+    call circumcircle_transform_3d(r_vert, R, c, alpha)
+
+    ! --- apply transform ---
+    do j = 1, m
+      txnew(:,j) = alpha * matmul(R, tx(:,j) - c)
+    end do
+    do j = 1, n
+      snxnew(:,j) = matmul(R, snx(:,j))
+    end do
+    do k = 1, nbd
+      sxbd(:,k)    = alpha * matmul(R, sxbd(:,k) - c)
+      stangbd(:,k) = alpha * matmul(R, stangbd(:,k))
+    end do
+
+    ! --- qhat = mean(snxnew) / norm (iside=0) ---
+    qhat = 0.0_r64
+    do j = 1, n
+      qhat = qhat + snxnew(:,j)
+    end do
+    qhat = qhat / real(n, r64)
+    qnrm = sqrt(qhat(1)**2 + qhat(2)**2 + qhat(3)**2)
+    qhat = qhat / qnrm
+
+    ! --- sxpbd = Dgl * sxbd per panel ---
+    sxpbd = 0.0_r64
+    do ell = 1, sbdnp
+      idx_start = (ell-1)*nquad + 1
+      idx_end   = ell*nquad
+      sxpbd(1,idx_start:idx_end) = matmul(Dgl, sxbd(1,idx_start:idx_end))
+      sxpbd(2,idx_start:idx_end) = matmul(Dgl, sxbd(2,idx_start:idx_end))
+      sxpbd(3,idx_start:idx_end) = matmul(Dgl, sxbd(3,idx_start:idx_end))
+    end do
+
+    ! --- kdata, cfptr, kernel eval, compression, accumulate ---
+    do j = 1, m
+      kdata(:,j) = qhat
+    end do
+    cfptr = c_funloc(asvestas_kernel_r64)
+
+    funvals = 0.0_r64
+    call line_kernel_eval_r64(m, txnew, nbd, sbdnp, nquad, &
+                               sxbd, sxpbd, stangbd, cfptr, kdata, funvals)
+
+    sxbdw = 0.0_r64
+    call line_quad_compress_r64(m, txnew, nbd, sbdnp, nquad,      &
+                                 sxbd, sxpbd, stangbd, sspbd,      &
+                                 tgl, wgl, Dgl, w_bclag,           &
+                                 Legmat, bclagmatlr,                &
+                                 cfptr, kdata, funvals, sxbdw)
+
+    do j = 1, m
+      IalphaAsvestas(j) = sum(funvals(:,:,j) * sxbdw(:,:,j))
+    end do
+
+    deallocate(tgl, wgl, Dgl, w_bclag, Legmat, vtmp)
+    deallocate(sxbd, stangbd, sspbd, txnew, snxnew, sxpbd)
+    deallocate(kdata, funvals, sxbdw, bclagmatlr)
+
+  end subroutine evaluate_solid_angle_integral_r64
+
+  subroutine evaluate_solid_angle_integral_r128(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+    use koorn_geom_mod, only: circumcircle_transform_3d_r128
+    use lq_kernel_mod,  only: line_kernel_eval_r128, line_quad_compress_r128
+    integer(8),  intent(in)    :: m, n, nbd
+    real(r128),  intent(in)    :: tx(3,m), sx(3,n), snx(3,n), sw(n)
+    real(r128),  intent(in)    :: r_vert(3,3), sxbd_in(3,nbd)
+    real(r128),  intent(inout) :: IalphaAsvestas(m)
+
+    integer(8) :: nquad, sbdnp
+    integer(8) :: j, k, ell, idx_start, idx_end
+    real(r128) :: alpha, qhat(3), qnrm, R(3,3), c(3)
+    real(r128) :: templ, tempr, denoml, denomr, tgll, tglr
+    real(r128) :: sxp(3)
+
+    real(r128), allocatable :: tgl(:), wgl(:), Dgl(:,:)
+    real(r128), allocatable :: w_bclag(:)
+    real(r128), allocatable :: Legmat(:,:), vtmp(:,:)
+    real(r128), allocatable :: txnew(:,:), snxnew(:,:), sxpbd(:,:)
+    real(r128), allocatable :: sxbd(:,:), stangbd(:,:), sspbd(:)
+    real(r128), allocatable :: kdata(:,:)
+    real(r128), allocatable :: funvals(:,:,:), sxbdw(:,:,:)
+    real(r128), allocatable :: bclagmatlr(:,:)
+
+    sbdnp = 3_8
+    nquad = nbd / sbdnp
+
+    allocate(tgl(nquad), wgl(nquad), Dgl(nquad,nquad))
+    allocate(w_bclag(nquad))
+    allocate(Legmat(nquad,nquad), vtmp(nquad,nquad))
+    allocate(txnew(3,m), snxnew(3,n), sxpbd(3,nbd))
+    allocate(sxbd(3,nbd), stangbd(3,nbd), sspbd(nbd))
+    allocate(kdata(3,m))
+    allocate(funvals(nquad,sbdnp,m), sxbdw(nquad,sbdnp,m))
+    allocate(bclagmatlr(nquad,2))
+
+    ! --- GL quadrature ---
+    call gauss_r128(nquad, tgl, wgl, Dgl)
+    call bclaginterpweights_r128(nquad, tgl, w_bclag)
+    call legeexps_r128(2_8, nquad, tgl, Legmat, vtmp, wgl)
+
+    ! --- bclagmatlr: barycentric interp weights at endpoints -1, +1 ---
+    tgll = -1.0_r128;  tglr = 1.0_r128
+    denoml = 0.0_r128;  denomr = 0.0_r128
+    do k = 1, nquad
+      templ = w_bclag(k) / (tgll - tgl(k))
+      tempr = w_bclag(k) / (tglr - tgl(k))
+      bclagmatlr(k,1) = templ
+      bclagmatlr(k,2) = tempr
+      denoml = denoml + templ
+      denomr = denomr + tempr
+    end do
+    bclagmatlr(:,1) = bclagmatlr(:,1) / denoml
+    bclagmatlr(:,2) = bclagmatlr(:,2) / denomr
+
+    ! --- copy analytic sxbd, compute stangbd = Dgl*sxbd_ell / |Dgl*sxbd_ell| ---
+    sxbd = sxbd_in
+    do ell = 1, sbdnp
+      idx_start = (ell-1)*nquad + 1
+      idx_end   = ell*nquad
+      do k = 1, nquad
+        sxp(1) = sum(Dgl(k,:) * sxbd(1, idx_start:idx_end))
+        sxp(2) = sum(Dgl(k,:) * sxbd(2, idx_start:idx_end))
+        sxp(3) = sum(Dgl(k,:) * sxbd(3, idx_start:idx_end))
+        sspbd(idx_start+k-1) = sqrt(sxp(1)**2 + sxp(2)**2 + sxp(3)**2)
+        stangbd(:, idx_start+k-1) = sxp / sspbd(idx_start+k-1)
+      end do
+    end do
+
+    ! --- circumcircle transform ---
+    R = 0.0_r128;  c = 0.0_r128;  alpha = 0.0_r128
+    call circumcircle_transform_3d_r128(r_vert, R, c, alpha)
+
+    ! --- apply transform ---
+    do j = 1, m
+      txnew(:,j) = alpha * matmul(R, tx(:,j) - c)
+    end do
+    do j = 1, n
+      snxnew(:,j) = matmul(R, snx(:,j))
+    end do
+    do k = 1, nbd
+      sxbd(:,k)    = alpha * matmul(R, sxbd(:,k) - c)
+      stangbd(:,k) = alpha * matmul(R, stangbd(:,k))
+    end do
+
+    ! --- qhat = mean(snxnew) / norm ---
+    qhat = 0.0_r128
+    do j = 1, n
+      qhat = qhat + snxnew(:,j)
+    end do
+    qhat = qhat / real(n, r128)
+    qnrm = sqrt(qhat(1)**2 + qhat(2)**2 + qhat(3)**2)
+    qhat = qhat / qnrm
+
+    ! --- sxpbd = Dgl * sxbd per panel ---
+    sxpbd = 0.0_r128
+    do ell = 1, sbdnp
+      idx_start = (ell-1)*nquad + 1
+      idx_end   = ell*nquad
+      sxpbd(1,idx_start:idx_end) = matmul(Dgl, sxbd(1,idx_start:idx_end))
+      sxpbd(2,idx_start:idx_end) = matmul(Dgl, sxbd(2,idx_start:idx_end))
+      sxpbd(3,idx_start:idx_end) = matmul(Dgl, sxbd(3,idx_start:idx_end))
+    end do
+
+    ! --- kdata, kernel eval, compression, accumulate ---
+    do j = 1, m
+      kdata(:,j) = qhat
+    end do
+
+    funvals = 0.0_r128
+    call line_kernel_eval_r128(m, txnew, nbd, sbdnp, nquad, &
+                                sxbd, sxpbd, stangbd, asvestas_kernel_r128, kdata, funvals)
+
+    sxbdw = 0.0_r128
+    call line_quad_compress_r128(m, txnew, nbd, sbdnp, nquad,     &
+                                  sxbd, sxpbd, stangbd, sspbd,     &
+                                  tgl, wgl, Dgl, w_bclag,          &
+                                  Legmat, bclagmatlr,               &
+                                  asvestas_kernel_r128, kdata, funvals, sxbdw)
+
+    do j = 1, m
+      IalphaAsvestas(j) = sum(funvals(:,:,j) * sxbdw(:,:,j))
+    end do
+
+    deallocate(tgl, wgl, Dgl, w_bclag, Legmat, vtmp)
+    deallocate(sxbd, stangbd, sspbd, txnew, snxnew, sxpbd)
+    deallocate(kdata, funvals, sxbdw, bclagmatlr)
+
+  end subroutine evaluate_solid_angle_integral_r128
+
+  ! ------------------------------------------------------------------
+  ! asvestas_kernel_r64  (bind(C) enables c_funloc + dlsym lookup)
+  ! kdata(1:3) = qhat
+  ! val = -[tau_s . (qhat x rhat)] / [|r| * (1 - qhat.rhat)]
+  ! ------------------------------------------------------------------
+  subroutine asvestas_kernel_r64(r_s, tau_s, r0j, kdata, val) bind(C)
+    real(r64), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata(3)
+    real(r64), intent(inout) :: val
+
+    real(r64) :: rvec(3), rdist, rhat(3), qhat(3), qcrossrhat(3), qdotrhat
+
+    qhat  = kdata(1:3)
+    rvec  = r_s - r0j
+    rdist = sqrt(rvec(1)**2 + rvec(2)**2 + rvec(3)**2)
+    rhat  = rvec / rdist
+
+    qcrossrhat(1) = qhat(2)*rhat(3) - qhat(3)*rhat(2)
+    qcrossrhat(2) = qhat(3)*rhat(1) - qhat(1)*rhat(3)
+    qcrossrhat(3) = qhat(1)*rhat(2) - qhat(2)*rhat(1)
+
+    qdotrhat = qhat(1)*rhat(1) + qhat(2)*rhat(2) + qhat(3)*rhat(3)
+
+    val = -(tau_s(1)*qcrossrhat(1) + tau_s(2)*qcrossrhat(2) + tau_s(3)*qcrossrhat(3)) &
+           / (rdist * (1.0_r64 - qdotrhat))
+
+  end subroutine asvestas_kernel_r64
+
+  subroutine asvestas_kernel_r128(r_s, tau_s, r0j, kdata, val)
+    real(r128), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata(3)
+    real(r128), intent(inout) :: val
+
+    real(r128) :: rvec(3), rdist, rhat(3), qhat(3), qcrossrhat(3), qdotrhat
+
+    qhat  = kdata(1:3)
+    rvec  = r_s - r0j
+    rdist = sqrt(rvec(1)**2 + rvec(2)**2 + rvec(3)**2)
+    rhat  = rvec / rdist
+
+    qcrossrhat(1) = qhat(2)*rhat(3) - qhat(3)*rhat(2)
+    qcrossrhat(2) = qhat(3)*rhat(1) - qhat(1)*rhat(3)
+    qcrossrhat(3) = qhat(1)*rhat(2) - qhat(2)*rhat(1)
+
+    qdotrhat = qhat(1)*rhat(1) + qhat(2)*rhat(2) + qhat(3)*rhat(3)
+
+    val = -(tau_s(1)*qcrossrhat(1) + tau_s(2)*qcrossrhat(2) + tau_s(3)*qcrossrhat(3)) &
+           / (rdist * (1.0_r128 - qdotrhat))
+
+  end subroutine asvestas_kernel_r128
+
+end module solidangle_mod

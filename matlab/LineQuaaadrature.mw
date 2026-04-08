@@ -1,0 +1,179 @@
+% LineQuaaadrature.mw
+% mwrap interface for linequaaadrature_mod + solidangle_mod
+%
+% Build flags: mwrap -c99complex -i8 -mex
+% After generation: perl -pi -e 's/_{2,}/_/g' LineQuaaadrature_mex.c
+%
+% ============================================================
+% mwrap syntax:
+%
+%   @function [inout1, inout2] = SubroutineName_mex(in1, in2, inout1, inout2)
+%   % optional MATLAB pre-processing (reshape etc.)
+%   # FORTRAN SubroutineName(type[dims] in1, type[dims] in2, inout type[dims] inout1, inout type[dims] inout2);
+%   end
+%
+% Convention: inout variables appear on BOTH sides of the MATLAB call.
+% This keeps Fortran and MATLAB calling sequences exactly the same.
+% type keywords: int, double, dcomplex
+% dims: [1] scalar, [n] vector, [3,n] array (col-major)
+%
+% ============================================================
+% New entries go below.
+% --------------------------------------------------------------------------
+@function [tgl, wgl, Dgl] = gauss_mex(n, tgl, wgl, Dgl)
+n = double(n);
+tgl = zeros(n, 1);
+wgl = zeros(n, 1);
+Dgl = zeros(n, n);
+# FORTRAN gauss_r64(int[1] n, inout double[n] tgl, inout double[n] wgl, inout double[n,n] Dgl);
+end
+
+% --------------------------------------------------------------------------
+% kernel_lookup_mex: look up a kernel subroutine by name via dlsym.
+%
+% Usage:
+%   fptr = kernel_lookup_mex('asvestas_kernel_r64');
+%
+% Returns an integer(8) handle (0 = not found).
+% Pass to line_kernel_eval_mex / line_quad_compress_mex as fptr_int.
+% --------------------------------------------------------------------------
+@function [fptr_int] = kernel_lookup_mex(sym_name, fptr_int)
+if nargin < 2
+  fptr_int = 0;
+end
+% mwrap marshals array inputs via mxDOUBLE_CLASS; pass ASCII bytes as double.
+sym_bytes  = uint8(sym_name);
+sym_name_c = double([sym_bytes(:).' 0]);     % null-terminated
+sym_len    = double(numel(sym_name_c));
+fptr_int   = double(fptr_int);
+# FORTRAN kernel_lookup(char[sym_len] sym_name_c, int[1] sym_len, inout int[1] fptr_int);
+end
+
+% --------------------------------------------------------------------------
+% line_kernel_eval_mex: evaluate kernel at all boundary quad nodes.
+%
+% [funvals] = line_kernel_eval_mex(m, r0, nbd, sbdnp, nquad,
+%                                   sxbd, sxpbd, stangbd,
+%                                   fptr_int, kdim, kdata, funvals)
+%
+% fptr_int: integer(8) from kernel_lookup_mex
+% kdata:    kdim x m  (per-target kernel data, e.g. kdata(:,j) = qhat)
+% funvals:  nquad x sbdnp x m  (output)
+% --------------------------------------------------------------------------
+@function [funvals] = line_kernel_eval_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, fptr_int, kdata, funvals)
+m        = double(m);
+nbd      = double(nbd);
+sbdnp    = double(sbdnp);
+nquad    = double(nquad);
+fptr_int = double(fptr_int);
+nqs     = nquad * sbdnp;
+funvals = zeros(nqs, m);
+# FORTRAN line_kernel_eval_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals);
+end
+
+% --------------------------------------------------------------------------
+% evaluate_solid_angle_integral_mex: compute Asvestas solid angle integral.
+%
+% [IalphaAsvestas] = evaluate_solid_angle_integral_mex(
+%     m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+%
+% tx(3,m)        : target points
+% sx(3,n)        : source positions (VR nodes)
+% snx(3,n)       : source normals (for qhat)
+% sw(n)          : source weights
+% r_vert(3,3)    : triangle vertices for circumcircle transform
+% nbd            : number of boundary quad nodes (= 3*nquad)
+% sxbd_in(3,nbd) : analytic boundary positions at GL nodes
+% IalphaAsvestas(m) : output solid angle values
+% --------------------------------------------------------------------------
+@function [IalphaAsvestas] = evaluate_solid_angle_integral_mex(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+m   = double(m);
+n   = double(n);
+nbd = double(nbd);
+if nargin < 10 || isempty(IalphaAsvestas)
+  IalphaAsvestas = zeros(m, 1);
+end
+# FORTRAN evaluate_solid_angle_integral(int[1] m, double[3,m] tx, int[1] n, double[3,n] sx, double[3,n] snx, double[n] sw, double[3,3] r_vert, int[1] nbd, double[3,nbd] sxbd_in, inout double[m] IalphaAsvestas);
+end
+
+% --------------------------------------------------------------------------
+% line_quad_compress_mex: error-driven GL bisection weight compression.
+%
+% [funvals, sxbdw] = line_quad_compress_mex(
+%     m, r0, nbd, sbdnp, nquad,
+%     sxbd, sxpbd, stangbd, sspbd,
+%     tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr,
+%     fptr_int, kdata, funvals, sxbdw)
+%
+% funvals, sxbdw: (nquad*sbdnp) x m here; Fortran sees (nquad,sbdnp,m).
+% --------------------------------------------------------------------------
+% --------------------------------------------------------------------------
+% create_ellipsoid_tri_mesh_mex: build VR triangular mesh on an ellipsoid.
+%
+% [x, nx, w, xbd, tri2face, tri2cell, tri_vert, ptr] = ...
+%     create_ellipsoid_tri_mesh_mex(mp, np, p, ratio, nquad_bdry, nvr, ntri, ...)
+%
+% Pass [] for any output array to auto-allocate.
+% 3D arrays x/nx/xbd/tri_vert are passed as 2D (first dims flattened).
+% Reshape outputs back after the call:
+%   x        = reshape(x,        3, nvr, ntri)
+%   nx       = reshape(nx,       3, nvr, ntri)
+%   xbd      = reshape(xbd,      3, 3*nquad_bdry, ntri)
+%   tri_vert = reshape(tri_vert, 3, 3, ntri)
+% tri2face(ntri), tri2cell(2,ntri), ptr(ntri+1) returned as double.
+% --------------------------------------------------------------------------
+@function [x, nx, w, xbd, tri2face, tri2cell, tri_vert, ptr] = create_ellipsoid_tri_mesh_mex(mp, np, p, nq, ratio, nquad_bdry, nvr, ntri, x, nx, w, xbd, tri2face, tri2cell, tri_vert, ptr)
+% nq = 0  : Vioreanu-Rokhlin nodes  (nvr = p*(p+1)/2)
+% nq > 0  : areal quadrature nodes  (nvr = 3*nq^2)
+mp         = double(mp);
+np         = double(np);
+p          = double(p);
+nq         = double(nq);
+ratio      = double(ratio);
+nquad_bdry = double(nquad_bdry);
+nvr        = double(nvr);
+ntri       = double(ntri);
+nxb        = 3 * nquad_bdry;
+nptr       = ntri + 1;
+nx3        = 3 * nvr;
+nxbd3      = 3 * nxb;
+ntv        = 9;
+if nargin < 8  || isempty(x),        x        = zeros(nx3,   ntri); end
+if nargin < 9  || isempty(nx),       nx       = zeros(nx3,   ntri); end
+if nargin < 10 || isempty(w),        w        = zeros(nvr,   ntri); end
+if nargin < 11 || isempty(xbd),      xbd      = zeros(nxbd3, ntri); end
+if nargin < 12 || isempty(tri2face), tri2face = zeros(ntri,  1);    end
+if nargin < 13 || isempty(tri2cell), tri2cell = zeros(2,     ntri); end
+if nargin < 14 || isempty(tri_vert), tri_vert = zeros(ntv,   ntri); end
+if nargin < 15 || isempty(ptr),      ptr      = zeros(nptr,  1);    end
+x        = reshape(x,        nx3,   ntri);
+nx       = reshape(nx,       nx3,   ntri);
+xbd      = reshape(xbd,      nxbd3, ntri);
+tri_vert = reshape(tri_vert, ntv,   ntri);
+# FORTRAN create_ellipsoid_tri_mesh(int[1] mp, int[1] np, int[1] p, int[1] nq, double[1] ratio, int[1] nquad_bdry, int[1] nvr, int[1] ntri, inout double[nx3,ntri] x, inout double[nx3,ntri] nx, inout double[nvr,ntri] w, inout double[nxbd3,ntri] xbd, inout double[ntri] tri2face, inout double[2,ntri] tri2cell, inout double[ntv,ntri] tri_vert, inout double[nptr] ptr);
+x        = reshape(x,        3, nvr, ntri);
+nx       = reshape(nx,       3, nvr, ntri);
+xbd      = reshape(xbd,      3, 3*nquad_bdry, ntri);
+tri_vert = reshape(tri_vert, 3, 3, ntri);
+end
+
+% --------------------------------------------------------------------------
+@function [funvals, sxbdw] = line_quad_compress_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr, fptr_int, kdata, funvals, sxbdw)
+m        = double(m);
+nbd      = double(nbd);
+sbdnp    = double(sbdnp);
+nquad    = double(nquad);
+fptr_int = double(fptr_int);
+nqs     = nquad * sbdnp;
+if nargin < 18 || isempty(funvals)
+  funvals = zeros(nqs, m);
+else
+  funvals = reshape(funvals, nqs, m);
+end
+if nargin < 19 || isempty(sxbdw)
+  sxbdw = zeros(nqs, m);
+else
+  sxbdw = reshape(sxbdw, nqs, m);
+end
+# FORTRAN line_quad_compress_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,nquad] Legmat, double[nquad,2] bclagmatlr, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals, inout double[nqs,m] sxbdw);
+end
