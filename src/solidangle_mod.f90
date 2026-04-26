@@ -18,20 +18,25 @@ contains
   !   sxbd_in(3,nbd) : analytic boundary positions at GL nodes
   !   IalphaAsvestas(m) : output solid angle values
   ! ------------------------------------------------------------------
-  subroutine evaluate_solid_angle_integral_r64(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
-    use koorn_geom_mod, only: circumcircle_transform_3d
-    use lq_kernel_mod,  only: line_kernel_eval_r64, line_quad_compress_r64
-    use iso_c_binding,  only: c_funptr, c_funloc
+  subroutine evaluate_solid_angle_integral_r64(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, use_nearroot, IalphaAsvestas)
+    use koorn_geom_mod,        only: circumcircle_transform_3d
+    use lq_kernel_mod,         only: line_kernel_eval_r64, line_quad_compress_r64, &
+                                     line_quad_compress_nearroot_r64
+    use lq_adaptive_mod, only: line_quad_root_initial_guess_r64, line_quad_root_refine_r64
+    use iso_c_binding,         only: c_funptr, c_funloc
     integer(8),  intent(in)    :: m, n, nbd
     real(r64),   intent(in)    :: tx(3,m), sx(3,n), snx(3,n), sw(n)
     real(r64),   intent(in)    :: r_vert(3,3), sxbd_in(3,nbd)
+    logical,     intent(in)    :: use_nearroot
     real(r64),   intent(inout) :: IalphaAsvestas(m)
 
     integer(8) :: nquad, sbdnp
     integer(8) :: j, k, ell, idx_start, idx_end
+    integer(8) :: n_expa, ifconv
     real(r64)  :: alpha, qhat(3), qnrm, R(3,3), c(3)
     real(r64)  :: templ, tempr, denoml, denomr, tgll, tglr
-    real(r64)  :: sxp(3)
+    real(r64)  :: sxp(3), rho, br
+    complex(8) :: tinit, troot
     type(c_funptr) :: cfptr
 
     real(r64), allocatable :: tgl(:), wgl(:), Dgl(:,:)
@@ -42,6 +47,9 @@ contains
     real(r64), allocatable :: kdata(:,:)
     real(r64), allocatable :: funvals(:,:,:), sxbdw(:,:,:)
     real(r64), allocatable :: bclagmatlr(:,:)
+    real(r64), allocatable :: root_re(:), root_im(:), xyz_hat(:,:)
+    real(r64), allocatable :: funvals_ell(:,:,:), sxbdw_ell(:,:,:)
+    logical,   allocatable :: root_ok(:)
 
     sbdnp = 3_8
     nquad = nbd / sbdnp
@@ -123,22 +131,91 @@ contains
       sxpbd(3,idx_start:idx_end) = matmul(Dgl, sxbd(3,idx_start:idx_end))
     end do
 
-    ! --- kdata, cfptr, kernel eval, compression, accumulate ---
+    ! --- kdata, cfptr ---
     do j = 1, m
       kdata(:,j) = qhat
     end do
     cfptr = c_funloc(asvestas_kernel_r64)
 
-    funvals = 0.0_r64
-    call line_kernel_eval_r64(m, txnew, nbd, sbdnp, nquad, &
-                               sxbd, sxpbd, stangbd, cfptr, kdata, funvals)
+    if (use_nearroot) then
+      ! --- nearroot path: per-panel root finding + compress ---
+      n_expa = min(16_8, nquad)
+      rho    = 4.0_r64**(16.0_r64 / real(nquad, r64))
+      allocate(root_re(m), root_im(m), root_ok(m))
+      allocate(xyz_hat(n_expa, 3))
+      allocate(funvals_ell(nquad, 1, m), sxbdw_ell(nquad, 1, m))
+      funvals = 0.0_r64
+      sxbdw   = 0.0_r64
 
-    sxbdw = 0.0_r64
-    call line_quad_compress_r64(m, txnew, nbd, sbdnp, nquad,      &
-                                 sxbd, sxpbd, stangbd, sspbd,      &
-                                 tgl, wgl, Dgl, w_bclag,           &
-                                 Legmat, bclagmatlr,                &
-                                 cfptr, kdata, funvals, sxbdw)
+      do ell = 1, sbdnp
+        idx_start = (ell-1)*nquad + 1
+        idx_end   = ell*nquad
+
+        ! Legendre projection of panel coords (first n_expa modes)
+        xyz_hat(:,1) = matmul(Legmat(1:n_expa,:), sxbd(1, idx_start:idx_end))
+        xyz_hat(:,2) = matmul(Legmat(1:n_expa,:), sxbd(2, idx_start:idx_end))
+        xyz_hat(:,3) = matmul(Legmat(1:n_expa,:), sxbd(3, idx_start:idx_end))
+
+        ! Per-target root finding
+        do j = 1, m
+          call line_quad_root_initial_guess_r64(tgl, sxbd(1,idx_start:idx_end), &
+                                          sxbd(2,idx_start:idx_end), &
+                                          sxbd(3,idx_start:idx_end), &
+                                          nquad, txnew(1,j), txnew(2,j), txnew(3,j), tinit)
+          root_ok(j) = .false.
+          root_re(j) = 0.0_r64
+          root_im(j) = 0.0_r64
+          br = abs(tinit + sqrt(tinit - 1.0_r64)*sqrt(tinit + 1.0_r64))
+          if (br < 1.75_r64*rho) then
+            call line_quad_root_refine_r64(xyz_hat(:,1), xyz_hat(:,2), xyz_hat(:,3), &
+                                     n_expa, txnew(1,j), txnew(2,j), txnew(3,j), &
+                                     tinit, troot, ifconv)
+            br = abs(troot + sqrt(troot - 1.0_r64)*sqrt(troot + 1.0_r64))
+            if (ifconv == 1_8 .and. br < rho) then
+              root_ok(j) = .true.
+              root_re(j) = real(troot, r64)
+              root_im(j) = aimag(troot)
+            end if
+          end if
+        end do
+
+        ! Kernel eval for this panel (sbdnp=1)
+        funvals_ell = 0.0_r64
+        call line_kernel_eval_r64(m, txnew, nquad, 1_8, nquad, &
+                                   sxbd(:, idx_start:idx_end), &
+                                   sxpbd(:, idx_start:idx_end), &
+                                   stangbd(:, idx_start:idx_end), &
+                                   cfptr, kdata, funvals_ell)
+
+        ! Nearroot compress for this panel (sbdnp=1)
+        sxbdw_ell = 0.0_r64
+        call line_quad_compress_nearroot_r64(m, txnew, nquad, 1_8, nquad, &
+                                              sxbd(:, idx_start:idx_end), &
+                                              sxpbd(:, idx_start:idx_end), &
+                                              stangbd(:, idx_start:idx_end), &
+                                              sspbd(idx_start:idx_end), &
+                                              tgl, wgl, Dgl, w_bclag, &
+                                              Legmat, bclagmatlr, &
+                                              cfptr, kdata, funvals_ell, sxbdw_ell, &
+                                              root_re, root_im, root_ok)
+        funvals(:, ell, :) = funvals_ell(:, 1, :)
+        sxbdw(:, ell, :)   = sxbdw_ell(:, 1, :)
+      end do
+
+      deallocate(root_re, root_im, root_ok, xyz_hat, funvals_ell, sxbdw_ell)
+
+    else
+      ! --- adaptive bisection path (all panels at once) ---
+      funvals = 0.0_r64
+      call line_kernel_eval_r64(m, txnew, nbd, sbdnp, nquad, &
+                                 sxbd, sxpbd, stangbd, cfptr, kdata, funvals)
+      sxbdw = 0.0_r64
+      call line_quad_compress_r64(m, txnew, nbd, sbdnp, nquad,  &
+                                   sxbd, sxpbd, stangbd, sspbd,  &
+                                   tgl, wgl, Dgl, w_bclag,       &
+                                   Legmat, bclagmatlr,            &
+                                   cfptr, kdata, funvals, sxbdw)
+    end if
 
     do j = 1, m
       IalphaAsvestas(j) = sum(funvals(:,:,j) * sxbdw(:,:,j))

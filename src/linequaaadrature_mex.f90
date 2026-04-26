@@ -81,17 +81,71 @@ end subroutine kernel_lookup
 ! No standalone wrapper needed.
 
 ! ------------------------------------------------------------------
+! lqa_root_initial_guess
+! Thin MEX-facing wrapper around line_quad_adaptive_mod::lqa_root_initial_guess_r64.
+! Complex output is split into real/imag parts for mwrap robustness.
+! ------------------------------------------------------------------
+subroutine lqa_root_initial_guess(n, tgl, x, y, z, tx, ty, tz, tinit_re, tinit_im)
+  use lq_adaptive_mod, only: line_quad_root_initial_guess_r64
+  implicit none
+  integer(8), intent(in)    :: n
+  real(8),    intent(in)    :: tgl(n), x(n), y(n), z(n)
+  real(8),    intent(in)    :: tx, ty, tz
+  real(8),    intent(inout) :: tinit_re, tinit_im
+
+  complex(8) :: tinit
+
+  call line_quad_root_initial_guess_r64(tgl, x, y, z, n, tx, ty, tz, tinit)
+
+  tinit_re = real(tinit, 8)
+  tinit_im = aimag(tinit)
+end subroutine lqa_root_initial_guess
+
+
+! ------------------------------------------------------------------
+! lqa_root_refine
+! Thin MEX-facing wrapper around line_quad_adaptive_mod::lqa_root_refine_r64.
+! Complex input/output are split into real/imag parts.
+! ifconv is returned as double to keep MATLAB-side handling simple.
+! ------------------------------------------------------------------
+subroutine lqa_root_refine(n_expa, xhat, yhat, zhat, tx, ty, tz, &
+                           tinit_re, tinit_im, troot_re, troot_im, ifconv_d)
+  use lq_adaptive_mod, only: line_quad_root_refine_r64
+  implicit none
+  integer(8), intent(in)    :: n_expa
+  real(8),    intent(in)    :: xhat(n_expa), yhat(n_expa), zhat(n_expa)
+  real(8),    intent(in)    :: tx, ty, tz
+  real(8),    intent(in)    :: tinit_re, tinit_im
+  real(8),    intent(inout) :: troot_re, troot_im, ifconv_d
+
+  complex(8) :: tinit, troot
+  integer(8) :: ifconv
+
+  tinit = cmplx(tinit_re, tinit_im, kind=8)
+
+  call line_quad_root_refine_r64(xhat, yhat, zhat, n_expa, tx, ty, tz, &
+                                 tinit, troot, ifconv)
+
+  troot_re = real(troot, 8)
+  troot_im = aimag(troot)
+  ifconv_d = real(ifconv, 8)
+end subroutine lqa_root_refine
+
+! ------------------------------------------------------------------
 ! evaluate_solid_angle_integral  — standalone wrapper for mwrap
 ! Delegates to solidangle_mod::evaluate_solid_angle_integral_r64.
 ! ------------------------------------------------------------------
-subroutine evaluate_solid_angle_integral(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+subroutine evaluate_solid_angle_integral(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, use_nearroot_i, IalphaAsvestas)
   use solidangle_mod, only: eval_sa => evaluate_solid_angle_integral_r64
   implicit none
   integer(8), intent(in)    :: m, n, nbd
   real(8),    intent(in)    :: tx(3,m), sx(3,n), snx(3,n), sw(n)
   real(8),    intent(in)    :: r_vert(3,3), sxbd_in(3,nbd)
+  integer(8), intent(in)    :: use_nearroot_i
   real(8),    intent(inout) :: IalphaAsvestas(m)
-  call eval_sa(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+  logical :: use_nearroot
+  use_nearroot = (use_nearroot_i /= 0_8)
+  call eval_sa(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, use_nearroot, IalphaAsvestas)
 end subroutine evaluate_solid_angle_integral
 
 ! ------------------------------------------------------------------

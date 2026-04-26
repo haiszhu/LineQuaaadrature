@@ -86,14 +86,18 @@ end
 % sxbd_in(3,nbd) : analytic boundary positions at GL nodes
 % IalphaAsvestas(m) : output solid angle values
 % --------------------------------------------------------------------------
-@function [IalphaAsvestas] = evaluate_solid_angle_integral_mex(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+@function [IalphaAsvestas] = evaluate_solid_angle_integral_mex(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, use_nearroot, IalphaAsvestas)
 m   = double(m);
 n   = double(n);
 nbd = double(nbd);
-if nargin < 10 || isempty(IalphaAsvestas)
+if nargin < 10 || isempty(use_nearroot)
+  use_nearroot = 0;
+end
+use_nearroot = double(logical(use_nearroot));
+if nargin < 11 || isempty(IalphaAsvestas)
   IalphaAsvestas = zeros(m, 1);
 end
-# FORTRAN evaluate_solid_angle_integral(int[1] m, double[3,m] tx, int[1] n, double[3,n] sx, double[3,n] snx, double[n] sw, double[3,3] r_vert, int[1] nbd, double[3,nbd] sxbd_in, inout double[m] IalphaAsvestas);
+# FORTRAN evaluate_solid_angle_integral(int[1] m, double[3,m] tx, int[1] n, double[3,n] sx, double[3,n] snx, double[n] sw, double[3,3] r_vert, int[1] nbd, double[3,nbd] sxbd_in, int[1] use_nearroot, inout double[m] IalphaAsvestas);
 end
 
 % --------------------------------------------------------------------------

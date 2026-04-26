@@ -33,7 +33,14 @@ This builds:
 ### Real64 test
 ```bash
 make test
-./build/test_solid_angle
+./build/test_solid_angle adaptive
+./build/test_solid_angle nearroot
+```
+
+```bash
+make test
+./build/test_solid_angle false
+./build/test_solid_angle true
 ```
 
 ### Real128 test (extended precision)

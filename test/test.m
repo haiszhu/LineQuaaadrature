@@ -52,19 +52,19 @@ ptr      = zeros(ntri+1,1);
       create_ellipsoid_tri_mesh_mex(mp, np, order, nq, ratio, nquad_bdry, nvr, ntri, ...                                                         
                               x, nx, w, xbd, tri2face, tri2cell, tri_vert, ptr);                                            
                                                                                                                                        
-% Areal:                                                                                                                               
-nq = 12;  nvr = 3*nq^2;   
-x        = zeros(3, nvr, ntri);
-nx       = zeros(3, nvr, ntri);
-w        = zeros(nvr, ntri);
-xbd      = zeros(3, 3*nquad_bdry, ntri);
-tri2face = zeros(ntri,1);
-tri2cell = zeros(2,ntri);
-tri_vert = zeros(3,3,ntri);
-ptr      = zeros(ntri+1,1);
-[x, nx, w, xbd, tri2face, tri2cell, tri_vert, ptr] = ...                                                                               
-      create_ellipsoid_tri_mesh_mex(mp, np, order, nq, ratio, nquad_bdry, nvr, ntri, ...                                                         
-                              x, nx, w, xbd, tri2face, tri2cell, tri_vert, ptr);   
+% % Areal:                                                                                                                               
+% nq = 12;  nvr = 3*nq^2;   
+% x        = zeros(3, nvr, ntri);
+% nx       = zeros(3, nvr, ntri);
+% w        = zeros(nvr, ntri);
+% xbd      = zeros(3, 3*nquad_bdry, ntri);
+% tri2face = zeros(ntri,1);
+% tri2cell = zeros(2,ntri);
+% tri_vert = zeros(3,3,ntri);
+% ptr      = zeros(ntri+1,1);
+% [x, nx, w, xbd, tri2face, tri2cell, tri_vert, ptr] = ...                                                                               
+%       create_ellipsoid_tri_mesh_mex(mp, np, order, nq, ratio, nquad_bdry, nvr, ntri, ...                                                         
+%                               x, nx, w, xbd, tri2face, tri2cell, tri_vert, ptr);   
 
 N = ntri * nvr;
 sx = reshape(x, 3, []);
@@ -91,6 +91,8 @@ count = 0;
 tmpidx = 1:numel(t.x(1,:));
 len = nvr;
 K_Atcxvec = zeros(numel(t.x(1,:)),1);
+% use_nearroot = false;
+use_nearroot = true;
 for k=1:ntri
 % for k=13
   sjx = x(:,:,k);
@@ -115,8 +117,8 @@ for k=1:ntri
     js = (k-1)*len+(1:len); 
     
     %
-    % IalphaAsvestas = evaluate_solid_angle_integral_mex(ntc,tcj.x,len,sjx,sjn,sjw);
-    IalphaAsvestas = evaluate_solid_angle_integral_mex(ntc, tcj.x, len, sjx, sjn, sjw, tri_vert(:,:,k), 3*nquad_bdry, sjxbd); 
+    IalphaAsvestas = zeros(ntc,1);
+    IalphaAsvestas = evaluate_solid_angle_integral_mex(ntc, tcj.x, len, sjx, sjn, sjw, tri_vert(:,:,k), 3*nquad_bdry, sjxbd, use_nearroot, IalphaAsvestas); 
     K_ij_naive = Lap3dDLPmat(tcj,sj);
     K_Atcxvec(idxc) = K_Atcxvec(idxc) - 1/(4*pi)*IalphaAsvestas - K_ij_naive*ones(len,1);
     % keyboard

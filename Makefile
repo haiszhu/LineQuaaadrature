@@ -72,6 +72,7 @@ FFLAGS := -g -O3 -ffast-math -fPIC \
 LQ_SOURCES := $(SRC_DIR)/linequaaadrature_mod.f90 \
               $(SRC_DIR)/koorn_geom.f90 \
               $(SRC_DIR)/lq_kernel.f90 \
+              $(SRC_DIR)/lq_adaptive.f90 \
               $(SRC_DIR)/solidangle_mod.f90 \
               $(SRC_DIR)/ellipsoid_mesh_mod.f90 \
               $(SRC_DIR)/lap3d_mod.f90 \
@@ -116,6 +117,12 @@ $(BLD_DIR):
 # ---- compile Fortran objects ----
 $(BLD_DIR)/%.o: $(SRC_DIR)/%.f90 | $(BLD_DIR)
 	$(FC) $(FFLAGS) -c $< -o $@
+
+$(BLD_DIR)/lq_adaptive.o: $(BLD_DIR)/linequaaadrature_mod.o
+
+$(BLD_DIR)/solidangle_mod.o: $(BLD_DIR)/lq_adaptive.o
+
+$(BLD_DIR)/linequaaadrature_mex.o: $(BLD_DIR)/lq_adaptive.o $(BLD_DIR)/solidangle_mod.o
 
 # note: module files (.mod) are emitted to BLD_DIR via -J flag
 # TODO: add -J$(BLD_DIR) once modules are non-empty
