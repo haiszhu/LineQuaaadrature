@@ -8,11 +8,3 @@ mex_id_ = 'gauss_r64(c i int64_t[x], c io double[x], c io double[x], c io double
 end
 
 % --------------------------------------------------------------------------
-% kernel_lookup_mex: look up a kernel subroutine by name via dlsym.
-%
-% Usage:
-%   fptr = kernel_lookup_mex('asvestas_kernel_r64');
-%
-% Returns an integer(8) handle (0 = not found).
-% Pass to line_kernel_eval_mex / line_quad_compress_mex as fptr_int.
-% --------------------------------------------------------------------------

@@ -62,11 +62,34 @@ program test_solid_angle_r128
   real(8)    :: t0, t1
   integer(8) :: k, i, ix, iy, iz
 
+  logical :: use_nearroot
+  character(len=32) :: mode
+  integer :: nargs
+
   ! ==============================================================
+  use_nearroot = .false.
+
+  nargs = command_argument_count()
+  if (nargs >= 1) then
+    call get_command_argument(1, mode)
+    select case (trim(adjustl(mode)))
+    case ('1', 'true', 'TRUE', 'True', 'nearroot', 'NEARROOT', 'Nearroot')
+      use_nearroot = .true.
+    case ('0', 'false', 'FALSE', 'False', 'adaptive', 'ADAPTIVE', 'Adaptive')
+      use_nearroot = .false.
+    case default
+      write(*,'(A,A)') 'Unknown mode: ', trim(mode)
+      write(*,'(A)')   'Use: ./build/test_solid_angle_r128 adaptive'
+      write(*,'(A)')   '  or ./build/test_solid_angle_r128 nearroot'
+      stop 1
+    end select
+  end if
+
   write(*,'(/,A)') '=== test_solid_angle_r128 (quad precision) ==='
   write(*,'(A,I0,A,I0,A,I0,A,I0,A,F4.1)') &
       'order=', order, '  nq=', nq, '  nvr=', nvr, &
       '  ntri=', ntri, '  ratio=', real(ratio, 8)
+  write(*,'(A,L1)') 'use_nearroot = ', use_nearroot
 
   ! ==============================================================
   ! Build ellipsoid mesh (r128, areal quadrature)
@@ -94,7 +117,7 @@ program test_solid_angle_r128
     ialpha2 = 0.0_r128
     call evaluate_solid_angle_integral_r128(2_8, tx2, nvr,               &
         x(:,:,k), nx_s(:,:,k), w(:,k),                                   &
-        tri_vert(:,:,k), 3_8*nquad_bdry, xbd(:,:,k), ialpha2)
+        tri_vert(:,:,k), 3_8*nquad_bdry, xbd(:,:,k), use_nearroot, ialpha2)
     omega_sum = omega_sum + ialpha2
   end do
 
@@ -181,7 +204,7 @@ program test_solid_angle_r128
     IalphaAsv = 0.0_r128
     call evaluate_solid_angle_integral_r128(ntc, tcj, nvr,             &
         x(:,:,k), nx_s(:,:,k), w(:,k),                                 &
-        tri_vert(:,:,k), 3_8*nquad_bdry, xbd(:,:,k), IalphaAsv)
+        tri_vert(:,:,k), 3_8*nquad_bdry, xbd(:,:,k), use_nearroot, IalphaAsv)
 
     call lap3ddlpmat_r128(ntc, tcj, nvr, x(:,:,k), nx_s(:,:,k), w(:,k), Kmat)
 

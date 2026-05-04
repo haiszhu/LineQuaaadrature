@@ -12,13 +12,8 @@ mex_id_ = 'kernel_lookup(c i char[x], c i int64_t[x], c io int64_t[x])';
 end
 
 % --------------------------------------------------------------------------
-% line_kernel_eval_mex: evaluate kernel at all boundary quad nodes.
+% lqa_root_initial_guess_mex
 %
-% [funvals] = line_kernel_eval_mex(m, r0, nbd, sbdnp, nquad,
-%                                   sxbd, sxpbd, stangbd,
-%                                   fptr_int, kdim, kdata, funvals)
-%
-% fptr_int: integer(8) from kernel_lookup_mex
-% kdata:    kdim x m  (per-target kernel data, e.g. kdata(:,j) = qhat)
-% funvals:  nquad x sbdnp x m  (output)
+% [tinit_re, tinit_im] = lqa_root_initial_guess_mex(
+%     tgl, x, y, z, n, tx, ty, tz)
 % --------------------------------------------------------------------------

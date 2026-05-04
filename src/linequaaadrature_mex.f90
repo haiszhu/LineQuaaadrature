@@ -26,6 +26,92 @@ subroutine gauss_r64(n, tgl, wgl, Dgl)
 end subroutine gauss_r64
 
 ! ------------------------------------------------------------------
+! bclaginterpweights_mex
+! ------------------------------------------------------------------
+subroutine bclaginterpweights_mex(n, x, w)
+  use linequaaadrature_mod, only: bclaginterpweights_r64
+  implicit none
+  integer(8), intent(in)    :: n
+  real(8),    intent(in)    :: x(n)
+  real(8),    intent(inout) :: w(n)
+
+  call bclaginterpweights_r64(n, x, w)
+end subroutine bclaginterpweights_mex
+
+! ------------------------------------------------------------------
+! legeexps_mex
+! ------------------------------------------------------------------
+subroutine legeexps_mex(itype, n, x, u, v, whts)
+  use linequaaadrature_mod, only: legeexps_r64
+  implicit none
+  integer(8), intent(in)    :: itype, n
+  real(8),    intent(inout) :: x(n), u(n,n), v(n,n), whts(n)
+
+  call legeexps_r64(itype, n, x, u, v, whts)
+end subroutine legeexps_mex
+
+! ------------------------------------------------------------------
+! legeexps_mex
+! ------------------------------------------------------------------
+subroutine legeexps_r128_mex(itype, n, x, u, v, whts)
+  use linequaaadrature_mod, only: lqlegeexps_r128 => legeexps_r128
+  use iso_c_binding, only: c_char, c_float128, c_int, c_long_long, c_null_char
+  implicit none
+  interface
+    function hdf5_write_legeexps_r128(file, n, x, u, v, whts) bind(C)
+      import c_char, c_float128, c_int, c_long_long
+      character(kind=c_char), intent(in) :: file(*)
+      integer(c_long_long), value :: n
+      real(c_float128), intent(in) :: x(*), u(*), v(*), whts(*)
+      integer(c_int) :: hdf5_write_legeexps_r128
+    end function hdf5_write_legeexps_r128
+  end interface
+  integer(8), intent(in)    :: itype, n
+  real(8),    intent(inout) :: x(n), u(n,n), v(n,n), whts(n)
+
+  integer(c_int) :: h5_ok
+  real(16) :: x_r128(n), u_r128(n,n), v_r128(n,n), whts_r128(n)
+  x_r128 = real(x, 16)
+  u_r128 = real(u, 16)
+  v_r128 = real(v, 16)
+  whts_r128 = real(whts, 16)
+  call lqlegeexps_r128(itype, n, x_r128, u_r128, v_r128, whts_r128)
+  h5_ok = hdf5_write_legeexps_r128('lqlegeexps_r128.h5'//c_null_char, n, &
+                                   x_r128, u_r128, v_r128, whts_r128)
+  x = real(x_r128, 8)
+  u = real(u_r128, 8)
+  v = real(v_r128, 8)
+  whts = real(whts_r128, 8)
+end subroutine legeexps_r128_mex
+
+! ------------------------------------------------------------------
+! legendre_expand_mex
+! ------------------------------------------------------------------
+subroutine legendre_expand_mex(nn, tnodes, wnodes, values, coeffs)
+  use linequaaadrature_mod, only: legepols_r64
+  implicit none
+  integer(8), intent(in)    :: nn
+  real(8),    intent(in)    :: tnodes(nn), wnodes(nn), values(nn)
+  real(8),    intent(inout) :: coeffs(nn)
+
+  real(8) :: pols(nn), wk
+  integer(8) :: j, k
+
+  coeffs = 0.0d0
+  do j = 1, nn
+    call legepols_r64(tnodes(j), nn, pols)
+    wk = wnodes(j) * values(j)
+    do k = 1, nn
+      coeffs(k) = coeffs(k) + wk * pols(k)
+    end do
+  end do
+
+  do k = 1, nn
+    coeffs(k) = 0.5d0 * real(2_8*k - 1_8, 8) * coeffs(k)
+  end do
+end subroutine legendre_expand_mex
+
+! ------------------------------------------------------------------
 ! kernel_lookup
 ! Looks up a Fortran standalone subroutine by name via dlsym.
 ! Appends '_' to sym_name before the null terminator.
@@ -45,6 +131,12 @@ subroutine kernel_lookup(sym_name, sym_len, fptr_int)
       real(c_double), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata3(3)
       real(c_double), intent(inout) :: val
     end subroutine asvestas_kernel_r64
+    subroutine invr_kernel_r64(r_s, tau_s, r0j, kdata3, val) bind(C)
+      use iso_c_binding, only: c_double
+      implicit none
+      real(c_double), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata3(3)
+      real(c_double), intent(inout) :: val
+    end subroutine invr_kernel_r64
   end interface
 
   integer(8) :: i, nlen
@@ -65,6 +157,8 @@ subroutine kernel_lookup(sym_name, sym_len, fptr_int)
   select case (trim(name))
   case ('asvestas_kernel_r64')
     fptr = c_funloc(asvestas_kernel_r64)
+  case ('invr_kernel_r64')
+    fptr = c_funloc(invr_kernel_r64)
   case default
     fptr = c_null_funptr
   end select
@@ -85,51 +179,17 @@ end subroutine kernel_lookup
 ! Thin MEX-facing wrapper around line_quad_adaptive_mod::lqa_root_initial_guess_r64.
 ! Complex output is split into real/imag parts for mwrap robustness.
 ! ------------------------------------------------------------------
-subroutine lqa_root_initial_guess(n, tgl, x, y, z, tx, ty, tz, tinit_re, tinit_im)
+subroutine lqa_root_initial_guess(tgl, x, y, z, n, tx, ty, tz, tinit)
   use lq_adaptive_mod, only: line_quad_root_initial_guess_r64
   implicit none
   integer(8), intent(in)    :: n
   real(8),    intent(in)    :: tgl(n), x(n), y(n), z(n)
   real(8),    intent(in)    :: tx, ty, tz
-  real(8),    intent(inout) :: tinit_re, tinit_im
-
-  complex(8) :: tinit
+  complex(8), intent(inout) :: tinit
 
   call line_quad_root_initial_guess_r64(tgl, x, y, z, n, tx, ty, tz, tinit)
 
-  tinit_re = real(tinit, 8)
-  tinit_im = aimag(tinit)
 end subroutine lqa_root_initial_guess
-
-
-! ------------------------------------------------------------------
-! lqa_root_refine
-! Thin MEX-facing wrapper around line_quad_adaptive_mod::lqa_root_refine_r64.
-! Complex input/output are split into real/imag parts.
-! ifconv is returned as double to keep MATLAB-side handling simple.
-! ------------------------------------------------------------------
-subroutine lqa_root_refine(n_expa, xhat, yhat, zhat, tx, ty, tz, &
-                           tinit_re, tinit_im, troot_re, troot_im, ifconv_d)
-  use lq_adaptive_mod, only: line_quad_root_refine_r64
-  implicit none
-  integer(8), intent(in)    :: n_expa
-  real(8),    intent(in)    :: xhat(n_expa), yhat(n_expa), zhat(n_expa)
-  real(8),    intent(in)    :: tx, ty, tz
-  real(8),    intent(in)    :: tinit_re, tinit_im
-  real(8),    intent(inout) :: troot_re, troot_im, ifconv_d
-
-  complex(8) :: tinit, troot
-  integer(8) :: ifconv
-
-  tinit = cmplx(tinit_re, tinit_im, kind=8)
-
-  call line_quad_root_refine_r64(xhat, yhat, zhat, n_expa, tx, ty, tz, &
-                                 tinit, troot, ifconv)
-
-  troot_re = real(troot, 8)
-  troot_im = aimag(troot)
-  ifconv_d = real(ifconv, 8)
-end subroutine lqa_root_refine
 
 ! ------------------------------------------------------------------
 ! evaluate_solid_angle_integral  — standalone wrapper for mwrap

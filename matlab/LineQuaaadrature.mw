@@ -20,6 +20,162 @@
 % ============================================================
 % New entries go below.
 % --------------------------------------------------------------------------
+@function [len, lenl, lenr] = lqk_estimate_nearroot_lengths_mex(t_root, root_imag_abs, max_len_each_side, len, lenl, lenr)
+t_root = double(t_root);
+root_imag_abs = double(root_imag_abs);
+max_len_each_side = double(max_len_each_side);
+if nargin < 4
+  len = 0;
+end
+if nargin < 5
+  lenl = 0;
+end
+if nargin < 6
+  lenr = 0;
+end
+len = double(len);
+lenl = double(lenl);
+lenr = double(lenr);
+# FORTRAN lqk_estimate_nearroot_lengths_mex(double[1] t_root, double[1] root_imag_abs, int[1] max_len_each_side, inout int[1] len, inout int[1] lenl, inout int[1] lenr);
+end
+
+% --------------------------------------------------------------------------
+@function [tpan, upan, wpan, xpan, ypan, zpan, xdisp, ydisp, zdisp, stangpan, sppan, dswpan] = lqk_build_nearroot_panels_local_mex(t0, nquad, npan, lenl, lenr, tgl, wgl, xjhat, yjhat, zjhat, rbase, tpan, upan, wpan, xpan, ypan, zpan, xdisp, ydisp, zdisp, stangpan, sppan, dswpan)
+t0 = double(t0);
+nquad = double(nquad);
+npan = double(npan);
+lenl = double(lenl);
+lenr = double(lenr);
+nquad3 = 3*nquad;
+tgl = double(tgl(:));
+wgl = double(wgl(:));
+xjhat = double(xjhat(:));
+yjhat = double(yjhat(:));
+zjhat = double(zjhat(:));
+rbase = double(rbase(:));
+tpan = double(reshape(tpan, nquad, npan));
+upan = double(reshape(upan, nquad, npan));
+wpan = double(reshape(wpan, nquad, npan));
+xpan = double(reshape(xpan, nquad, npan));
+ypan = double(reshape(ypan, nquad, npan));
+zpan = double(reshape(zpan, nquad, npan));
+xdisp = double(reshape(xdisp, nquad, npan));
+ydisp = double(reshape(ydisp, nquad, npan));
+zdisp = double(reshape(zdisp, nquad, npan));
+stangpan = double(reshape(stangpan, nquad3, npan));
+sppan = double(reshape(sppan, nquad, npan));
+dswpan = double(reshape(dswpan, nquad, npan));
+# FORTRAN lqk_build_nearroot_panels_local_mex(double[1] t0, int[1] nquad, int[1] npan, int[1] lenl, int[1] lenr, double[nquad] tgl, double[nquad] wgl, double[nquad] xjhat, double[nquad] yjhat, double[nquad] zjhat, double[3] rbase, inout double[nquad,npan] tpan, inout double[nquad,npan] upan, inout double[nquad,npan] wpan, inout double[nquad,npan] xpan, inout double[nquad,npan] ypan, inout double[nquad,npan] zpan, inout double[nquad,npan] xdisp, inout double[nquad,npan] ydisp, inout double[nquad,npan] zdisp, inout double[nquad3,npan] stangpan, inout double[nquad,npan] sppan, inout double[nquad,npan] dswpan);
+stangpan = double(reshape(stangpan, 3, nquad, npan));
+end
+
+% --------------------------------------------------------------------------
+@function [funvals_local, integrand0_up, I_local, kval] = lqk_line_kernel_eval_local_mex(nquad, npan, xdisp, ydisp, zdisp, stangpan, sppan, dswpan, target_loc, fptr_int, kdata, funvals_local, integrand0_up, I_local, kval)
+nquad = double(nquad);
+npan = double(npan);
+nquad3 = 3*nquad;
+nup = nquad*npan;
+xdisp = double(reshape(xdisp, nquad, npan));
+ydisp = double(reshape(ydisp, nquad, npan));
+zdisp = double(reshape(zdisp, nquad, npan));
+stangpan = double(reshape(stangpan, nquad3, npan));
+sppan = double(reshape(sppan, nquad, npan));
+dswpan = double(reshape(dswpan, nquad, npan));
+target_loc = double(target_loc(:));
+fptr_int = double(fptr_int);
+kdata = double(kdata(:));
+funvals_local = double(reshape(funvals_local, nquad, npan));
+integrand0_up = double(reshape(integrand0_up, nup, 1));
+I_local = double(I_local);
+kval = double(reshape(kval, nquad, npan));
+# FORTRAN lqk_line_kernel_eval_local_mex(int[1] nquad, int[1] npan, double[nquad,npan] xdisp, double[nquad,npan] ydisp, double[nquad,npan] zdisp, double[nquad3,npan] stangpan, double[nquad,npan] sppan, double[nquad,npan] dswpan, double[3] target_loc, int[1] fptr_int, double[3] kdata, inout double[nquad,npan] funvals_local, inout double[nup] integrand0_up, inout double[1] I_local, inout double[nquad,npan] kval);
+stangpan = double(reshape(stangpan, 3, nquad, npan));
+integrand0_up = double(reshape(integrand0_up, nup, 1));
+end
+
+% --------------------------------------------------------------------------
+@function [funvals0, sxbdw] = lqk_line_quad_compress_nearroot_local_mex(root_ok, nquad, npan, tgl, wgl, legmat, xhat, yhat, zhat, t0, tpan, wpan, target_loc, fptr_int, kdata, integrand0_up, funvals0, sxbdw)
+root_ok = double(root_ok);
+nquad = double(nquad);
+npan = double(npan);
+nup = nquad*npan;
+tgl = double(tgl(:));
+wgl = double(wgl(:));
+legmat = double(reshape(legmat, nquad, nquad));
+xhat = double(xhat(:));
+yhat = double(yhat(:));
+zhat = double(zhat(:));
+t0 = double(t0);
+tpan = double(reshape(tpan, nquad, npan));
+wpan = double(reshape(wpan, nquad, npan));
+target_loc = double(target_loc(:));
+fptr_int = double(fptr_int);
+kdata = double(kdata(:));
+integrand0_up = double(reshape(integrand0_up, nup, 1));
+funvals0 = double(reshape(funvals0, nquad, 1));
+sxbdw = double(reshape(sxbdw, nquad, 1));
+# FORTRAN lqk_line_quad_compress_nearroot_local_mex(int[1] root_ok, int[1] nquad, int[1] npan, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] legmat, double[nquad] xhat, double[nquad] yhat, double[nquad] zhat, double[1] t0, double[nquad,npan] tpan, double[nquad,npan] wpan, double[3] target_loc, int[1] fptr_int, double[3] kdata, double[nup] integrand0_up, inout double[nquad] funvals0, inout double[nquad] sxbdw);
+end
+
+% --------------------------------------------------------------------------
+@function [funvals0, weights, troot, accepted_i, I_local] = lqk_build_target_nearroot_weights_local_mex(nquad, tgl, wgl, legmat, xj, yj, zj, spj, stauj, xjhat, yjhat, zjhat, rho, xtk, ytk, ztk, fptr_int, kdata, funvals0, weights, troot, accepted_i, I_local)
+nquad = double(nquad);
+tgl = double(tgl(:));
+wgl = double(wgl(:));
+legmat = double(reshape(legmat, nquad, nquad));
+xj = double(xj(:));
+yj = double(yj(:));
+zj = double(zj(:));
+spj = double(spj(:));
+stauj = double(reshape(stauj, 3, nquad));
+xjhat = double(xjhat(:));
+yjhat = double(yjhat(:));
+zjhat = double(zjhat(:));
+rho = double(rho);
+xtk = double(xtk);
+ytk = double(ytk);
+ztk = double(ztk);
+fptr_int = double(fptr_int);
+kdata = double(kdata(:));
+funvals0 = double(funvals0(:));
+weights = double(weights(:));
+troot = complex(troot);
+accepted_i = double(accepted_i);
+I_local = double(I_local);
+# FORTRAN lqk_build_target_nearroot_weights_local_mex(int[1] nquad, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] legmat, double[nquad] xj, double[nquad] yj, double[nquad] zj, double[nquad] spj, double[3,nquad] stauj, double[nquad] xjhat, double[nquad] yjhat, double[nquad] zjhat, double[1] rho, double[1] xtk, double[1] ytk, double[1] ztk, int[1] fptr_int, double[3] kdata, inout double[nquad] funvals0, inout double[nquad] weights, inout dcomplex[1] troot, inout int[1] accepted_i, inout double[1] I_local);
+end
+
+% --------------------------------------------------------------------------
+@function [funvals0, weights, troot, accepted_i, I_local] = lqk_build_target_nearroot_weights_mex(nquad, tgl, wgl, legmat, xj, yj, zj, spj, stauj, xjhat, yjhat, zjhat, rho, xtk, ytk, ztk, fptr_int, kdata, funvals0, weights, troot, accepted_i, I_local, kernel_id, adaptive_fallback_i)
+nquad = double(nquad);
+tgl = double(tgl(:));
+wgl = double(wgl(:));
+legmat = double(reshape(legmat, nquad, nquad));
+xj = double(xj(:));
+yj = double(yj(:));
+zj = double(zj(:));
+spj = double(spj(:));
+stauj = double(reshape(stauj, 3, nquad));
+xjhat = double(xjhat(:));
+yjhat = double(yjhat(:));
+zjhat = double(zjhat(:));
+rho = double(rho);
+xtk = double(xtk);
+ytk = double(ytk);
+ztk = double(ztk);
+fptr_int = double(fptr_int);
+kdata = double(kdata(:));
+funvals0 = double(funvals0(:));
+weights = double(weights(:));
+troot = complex(troot);
+accepted_i = double(accepted_i);
+I_local = double(I_local);
+kernel_id = double(kernel_id);
+adaptive_fallback_i = double(adaptive_fallback_i);
+# FORTRAN lqk_build_target_nearroot_weights_mex(int[1] nquad, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] legmat, double[nquad] xj, double[nquad] yj, double[nquad] zj, double[nquad] spj, double[3,nquad] stauj, double[nquad] xjhat, double[nquad] yjhat, double[nquad] zjhat, double[1] rho, double[1] xtk, double[1] ytk, double[1] ztk, int[1] fptr_int, double[3] kdata, inout double[nquad] funvals0, inout double[nquad] weights, inout dcomplex[1] troot, inout int[1] accepted_i, inout double[1] I_local, int[1] kernel_id, int[1] adaptive_fallback_i);
+end
+
+% --------------------------------------------------------------------------
 @function [tgl, wgl, Dgl] = gauss_mex(n, tgl, wgl, Dgl)
 n = double(n);
 tgl = zeros(n, 1);
@@ -27,6 +183,48 @@ wgl = zeros(n, 1);
 Dgl = zeros(n, n);
 # FORTRAN gauss_r64(int[1] n, inout double[n] tgl, inout double[n] wgl, inout double[n,n] Dgl);
 end
+
+% --------------------------------------------------------------------------
+@function [w] = bclaginterpweights_mex(n, x, w)
+n = double(n);
+x = double(x(:));
+w = double(w(:));
+# FORTRAN bclaginterpweights_mex(int[1] n, double[n] x, inout double[n] w);
+end
+
+% --------------------------------------------------------------------------
+@function [x, u, v, whts] = legeexps_mex(itype, n, x, u, v, whts)
+itype = double(itype);
+n = double(n);
+x = double(x(:));
+u = double(reshape(u, n, n));
+v = double(reshape(v, n, n));
+whts = double(whts(:));
+# FORTRAN legeexps_mex(int[1] itype, int[1] n, inout double[n] x, inout double[n,n] u, inout double[n,n] v, inout double[n] whts);
+end
+
+% --------------------------------------------------------------------------
+@function [x, u, v, whts] = legeexps_r128_mex(itype, n, x, u, v, whts)
+itype = double(itype);
+n = double(n);
+x = double(x(:));
+u = double(reshape(u, n, n));
+v = double(reshape(v, n, n));
+whts = double(whts(:));
+# FORTRAN legeexps_r128_mex(int[1] itype, int[1] n, inout double[n] x, inout double[n,n] u, inout double[n,n] v, inout double[n] whts);
+end
+
+% --------------------------------------------------------------------------
+@function [coeffs] = legendre_expand_mex(nn, tnodes, wnodes, values, coeffs)
+nn = double(nn);
+tnodes = double(tnodes(:));
+wnodes = double(wnodes(:));
+values = double(values(:));
+coeffs = double(coeffs(:));
+# FORTRAN legendre_expand_mex(int[1] nn, double[nn] tnodes, double[nn] wnodes, double[nn] values, inout double[nn] coeffs);
+end
+
+
 
 % --------------------------------------------------------------------------
 % kernel_lookup_mex: look up a kernel subroutine by name via dlsym.
@@ -50,9 +248,83 @@ fptr_int   = double(fptr_int);
 end
 
 % --------------------------------------------------------------------------
-% line_kernel_eval_mex: evaluate kernel at all boundary quad nodes.
+% lqa_root_initial_guess_mex
 %
-% [funvals] = line_kernel_eval_mex(m, r0, nbd, sbdnp, nquad,
+% [tinit_re, tinit_im] = lqa_root_initial_guess_mex(
+%     tgl, x, y, z, n, tx, ty, tz)
+% --------------------------------------------------------------------------
+@function [tinit] = lqa_root_initial_guess_mex(tgl, x, y, z, n, tx, ty, tz, tinit)
+n   = double(n);
+tgl = double(tgl(:));
+x   = double(x(:));
+y   = double(y(:));
+z   = double(z(:));
+tx  = double(tx);
+ty  = double(ty);
+tz  = double(tz);
+
+if nargin < 9 || isempty(tinit)
+  tinit = 0;
+end
+
+# FORTRAN lqa_root_initial_guess(double[n] tgl, double[n] x, double[n] y, double[n] z, int[1] n, double[1] tx, double[1] ty, double[1] tz, inout dcomplex[1] tinit);
+end
+
+
+% --------------------------------------------------------------------------
+% lqa_root_refine_mex
+%
+% [troot_re, troot_im, ifconv] = lqa_root_refine_mex(
+%     n_expa, xhat, yhat, zhat, tx, ty, tz, tinit_re, tinit_im)
+% --------------------------------------------------------------------------
+@function [troot, ifconv] = lqa_root_refine_mex(xhat, yhat, zhat, n_expa, tx, ty, tz, tinit, troot, ifconv)
+n_expa   = double(n_expa);
+xhat     = double(xhat(:));
+yhat     = double(yhat(:));
+zhat     = double(zhat(:));
+tx       = double(tx);
+ty       = double(ty);
+tz       = double(tz);
+
+if nargin < 9 || isempty(troot)
+  troot = 0;
+end
+if nargin < 10 || isempty(ifconv)
+  ifconv = 0;
+end
+
+# FORTRAN lqa_root_refine_mex(double[n_expa] xhat, double[n_expa] yhat, double[n_expa] zhat, int[1] n_expa, double[1] tx, double[1] ty, double[1] tz, dcomplex[1] tinit, inout dcomplex[1] troot, inout int[1] ifconv);
+end
+
+% --------------------------------------------------------------------------
+% lqa_root_refine_mex
+%
+% [troot_re, troot_im, ifconv] = lqa_root_refine_mex(
+%     n_expa, xhat, yhat, zhat, tx, ty, tz, tinit_re, tinit_im)
+% --------------------------------------------------------------------------
+@function [troot, ifconv] = lqa_root_refine_r128_mex(xhat, yhat, zhat, n_expa, tx, ty, tz, tinit, troot, ifconv)
+n_expa   = double(n_expa);
+xhat     = double(xhat(:));
+yhat     = double(yhat(:));
+zhat     = double(zhat(:));
+tx       = double(tx);
+ty       = double(ty);
+tz       = double(tz);
+
+if nargin < 9 || isempty(troot)
+  troot = 0;
+end
+if nargin < 10 || isempty(ifconv)
+  ifconv = 0;
+end
+
+# FORTRAN lqa_root_refine_r128_mex(double[n_expa] xhat, double[n_expa] yhat, double[n_expa] zhat, int[1] n_expa, double[1] tx, double[1] ty, double[1] tz, dcomplex[1] tinit, inout dcomplex[1] troot, inout int[1] ifconv);
+end
+
+% --------------------------------------------------------------------------
+% lqk_eval_mex: evaluate kernel at all boundary quad nodes.
+%
+% [funvals] = lqk_eval_mex(m, r0, nbd, sbdnp, nquad,
 %                                   sxbd, sxpbd, stangbd,
 %                                   fptr_int, kdim, kdata, funvals)
 %
@@ -60,7 +332,7 @@ end
 % kdata:    kdim x m  (per-target kernel data, e.g. kdata(:,j) = qhat)
 % funvals:  nquad x sbdnp x m  (output)
 % --------------------------------------------------------------------------
-@function [funvals] = line_kernel_eval_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, fptr_int, kdata, funvals)
+@function [funvals] = lqk_eval_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, fptr_int, kdata, funvals)
 m        = double(m);
 nbd      = double(nbd);
 sbdnp    = double(sbdnp);
@@ -68,7 +340,18 @@ nquad    = double(nquad);
 fptr_int = double(fptr_int);
 nqs     = nquad * sbdnp;
 funvals = zeros(nqs, m);
-# FORTRAN line_kernel_eval_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals);
+# FORTRAN lqk_eval_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals);
+end
+
+@function [funvals] = lqk_eval_r128_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, fptr_int, kdata, funvals)
+m        = double(m);
+nbd      = double(nbd);
+sbdnp    = double(sbdnp);
+nquad    = double(nquad);
+fptr_int = double(fptr_int);
+nqs     = nquad * sbdnp;
+funvals = zeros(nqs, m);
+# FORTRAN lqk_eval_r128_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals);
 end
 
 % --------------------------------------------------------------------------
@@ -180,4 +463,125 @@ else
   sxbdw = reshape(sxbdw, nqs, m);
 end
 # FORTRAN line_quad_compress_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,nquad] Legmat, double[nquad,2] bclagmatlr, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals, inout double[nqs,m] sxbdw);
+end
+
+@function [funvals, sxbdw] = lqk_compress_nearroot_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr, fptr_int, kdata, funvals, sxbdw, root_re, root_im, root_ok)
+m        = double(m);
+nbd      = double(nbd);
+sbdnp    = double(sbdnp);
+nquad    = double(nquad);
+fptr_int = double(fptr_int);
+nqs      = nquad * sbdnp;
+if nargin < 18 || isempty(funvals)
+  funvals = zeros(nqs, m);
+else
+  funvals = reshape(funvals, nqs, m);
+end
+if nargin < 19 || isempty(sxbdw)
+  sxbdw = zeros(nqs, m);
+else
+  sxbdw = reshape(sxbdw, nqs, m);
+end
+root_re = double(root_re(:));
+root_im = double(root_im(:));
+root_ok = double(root_ok(:));
+# FORTRAN lqk_compress_nearroot_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,nquad] Legmat, double[nquad,2] bclagmatlr, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals, inout double[nqs,m] sxbdw, double[m] root_re, double[m] root_im, int[m] root_ok);
+end
+
+@function [funvals, sxbdw] = lqk_compress_nearroot_r128_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr, fptr_int, kdata, funvals, sxbdw, root_re, root_im, root_ok)
+m        = double(m);
+nbd      = double(nbd);
+sbdnp    = double(sbdnp);
+nquad    = double(nquad);
+fptr_int = double(fptr_int);
+nqs      = nquad * sbdnp;
+if nargin < 18 || isempty(funvals)
+  funvals = zeros(nqs, m);
+else
+  funvals = reshape(funvals, nqs, m);
+end
+if nargin < 19 || isempty(sxbdw)
+  sxbdw = zeros(nqs, m);
+else
+  sxbdw = reshape(sxbdw, nqs, m);
+end
+root_re = double(root_re(:));
+root_im = double(root_im(:));
+root_ok = double(root_ok(:));
+# FORTRAN lqk_compress_nearroot_r128_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,nquad] Legmat, double[nquad,2] bclagmatlr, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals, inout double[nqs,m] sxbdw, double[m] root_re, double[m] root_im, int[m] root_ok);
+end
+
+@function [funvals, sxbdw] = lqk_eval_compress_nearroot_r128_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr, fptr_int, kdata, funvals, sxbdw, root_re, root_im, root_ok)
+m        = double(m);
+nbd      = double(nbd);
+sbdnp    = double(sbdnp);
+nquad    = double(nquad);
+fptr_int = double(fptr_int);
+nqs      = nquad * sbdnp;
+if nargin < 18 || isempty(funvals)
+  funvals = zeros(nqs, m);
+else
+  funvals = reshape(funvals, nqs, m);
+end
+if nargin < 19 || isempty(sxbdw)
+  sxbdw = zeros(nqs, m);
+else
+  sxbdw = reshape(sxbdw, nqs, m);
+end
+root_re = double(root_re(:));
+root_im = double(root_im(:));
+root_ok = double(root_ok(:));
+# FORTRAN lqk_eval_compress_nearroot_r128_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,nquad] Legmat, double[nquad,2] bclagmatlr, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals, inout double[nqs,m] sxbdw, double[m] root_re, double[m] root_im, int[m] root_ok);
+end
+
+@function [q_lq64] = lqe_line_integral_r128_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, fptr_int, kdata, q_lq64)
+m        = double(m);
+nbd      = double(nbd);
+sbdnp    = double(sbdnp);
+nquad    = double(nquad);
+fptr_int = double(fptr_int);
+if nargin < 12 || isempty(q_lq64)
+  q_lq64 = zeros(m, 1);
+else
+  q_lq64 = double(q_lq64(:));
+end
+# FORTRAN lqe_line_integral_r128_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, int[1] fptr_int, double[3,m] kdata, inout double[m] q_lq64);
+end
+
+% --------------------------------------------------------------------------
+% line_quad_compress_nearroot_mex: nearroot GL weight compression.
+%
+% [funvals, sxbdw] = line_quad_compress_nearroot_mex(
+%     m, r0, nbd, sbdnp, nquad,
+%     sxbd, sxpbd, stangbd, sspbd,
+%     tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr,
+%     fptr_int, kdata, funvals, sxbdw,
+%     root_re, root_im, root_ok)
+%
+% root_re(m)  : real part of nearest singularity in parameter [-1,1]
+% root_im(m)  : imaginary part (distance from real axis)
+% root_ok(m)  : nonzero = use nearroot path; 0 = fall back to adaptive
+% funvals, sxbdw: (nquad*sbdnp) x m here; Fortran sees (nquad,sbdnp,m).
+% --------------------------------------------------------------------------
+@function [funvals, sxbdw] = line_quad_compress_nearroot_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr, fptr_int, kdata, funvals, sxbdw, root_re, root_im, root_ok)
+m        = double(m);
+nbd      = double(nbd);
+sbdnp    = double(sbdnp);
+nquad    = double(nquad);
+fptr_int = double(fptr_int);
+nqs      = nquad * sbdnp;
+if nargin < 18 || isempty(funvals)
+  funvals = zeros(nqs, m);
+else
+  funvals = reshape(funvals, nqs, m);
+end
+if nargin < 19 || isempty(sxbdw)
+  sxbdw = zeros(nqs, m);
+else
+  sxbdw = reshape(sxbdw, nqs, m);
+end
+root_re = double(root_re(:));
+root_im = double(root_im(:));
+root_ok = double(root_ok(:));
+# FORTRAN line_quad_compress_nearroot_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,nquad] Legmat, double[nquad,2] bclagmatlr, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals, inout double[nqs,m] sxbdw, double[m] root_re, double[m] root_im, int[m] root_ok);
 end

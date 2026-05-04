@@ -6,8 +6,12 @@
 #   2. quad precision support (real(16) / __float128 via -lquadmath)
 #
 # Usage:
-#   make          — build lib + mex
-#   make clean    — remove build artifacts
+#   make -f Makefile          — show build targets
+#   make -f Makefile lib      — build static library
+#   make -f Makefile mex      — build MATLAB MEX gateway
+#   make -f Makefile test     — build solid-angle r64 test
+#   make -f Makefile test_r128 — build solid-angle r128 test
+#   make -f Makefile clean    — remove build artifacts
 
 SHELL := /bin/bash
 
@@ -53,12 +57,16 @@ else
 endif
 
 OPENBLAS_LIBS := -L$(OPENBLAS_DIR)/lib -lopenblas
+HDF5_ROOT ?= /opt/homebrew/opt/hdf5
+HDF5_INC := -I$(HDF5_ROOT)/include
+HDF5_LIBS := -L$(HDF5_ROOT)/lib -lhdf5
 
 # ---- Fortran flags ----
 # -fdefault-integer-8 : 8-byte integers (matches mwrap -i8)
 # -freal-4-real-16    : TODO enable for quad precision build
 # -lquadmath          : TODO link quad math library for real(16) support
-FFLAGS := -g -O3 -ffast-math -fPIC \
+FFLAGS := -g -O3 -fPIC \
+           -ffp-contract=off -fno-unsafe-math-optimizations \
            -fallow-argument-mismatch -std=legacy -w \
            -fdefault-integer-8 \
            -frecursive \
@@ -70,16 +78,20 @@ FFLAGS := -g -O3 -ffast-math -fPIC \
 # ---- sources and objects ----
 # TODO: add additional .f90 files to LQ_SOURCES as needed
 LQ_SOURCES := $(SRC_DIR)/linequaaadrature_mod.f90 \
-              $(SRC_DIR)/koorn_geom.f90 \
-              $(SRC_DIR)/lq_kernel.f90 \
-              $(SRC_DIR)/lq_adaptive.f90 \
-              $(SRC_DIR)/solidangle_mod.f90 \
-              $(SRC_DIR)/ellipsoid_mesh_mod.f90 \
-              $(SRC_DIR)/lap3d_mod.f90 \
               $(SRC_DIR)/linequaaadrature_mex.f90 \
-              $(SRC_DIR)/lq_kernel_mex.f90
+              $(SRC_DIR)/koorn_geom_mod.f90 \
+              $(SRC_DIR)/kernel_mod.f90 \
+			  $(SRC_DIR)/kernel_mex.f90 \
+              $(SRC_DIR)/adaptive_mod.f90 \
+			  $(SRC_DIR)/adaptive_mex.f90 \
+	              $(SRC_DIR)/solidangle_mod.f90 \
+				  $(SRC_DIR)/solidangle_mex.f90 \
+	              $(SRC_DIR)/ellipsoid_mesh_mod.f90 \
+	              $(SRC_DIR)/lap3d_mod.f90
+	              
 
-LQ_OBJECTS := $(patsubst $(SRC_DIR)/%.f90, $(BLD_DIR)/%.o, $(LQ_SOURCES))
+LQ_OBJECTS := $(patsubst $(SRC_DIR)/%.f90, $(BLD_DIR)/%.o, $(LQ_SOURCES)) \
+		              $(BLD_DIR)/hdf5_io.o
 
 LIB := $(BLD_DIR)/libLineQuaaadrature.a
 
@@ -90,14 +102,26 @@ MEX_OUT := $(MATLAB_DIR)/LineQuaaadrature_mex.$(MEX_EXT)
 
 # ============================================================
 
-TEST_SRC     := $(ROOT)/test/test_solid_angle.f90
+TEST_SRC     := $(ROOT)/test/solid_angle/test_solid_angle.f90
 TEST_BIN     := $(BLD_DIR)/test_solid_angle
-TEST_R128_SRC := $(ROOT)/test/test_solid_angle_r128.f90
+TEST_R128_SRC := $(ROOT)/test/solid_angle/test_solid_angle_r128.f90
 TEST_R128_BIN := $(BLD_DIR)/test_solid_angle_r128
 
-.PHONY: all test test_r128 clean
+.PHONY: all mex lib test test_r128 clean
 
-all: $(MEX_OUT)
+all:
+	@echo "LineQuaaadrature build targets"
+	@echo ""
+	@echo "  make -f Makefile mex        build LineQuaaadrature_mex.$(MEX_EXT)"
+	@echo "  make -f Makefile lib        build build/libLineQuaaadrature.a"
+	@echo "  make -f Makefile test       build build/test_solid_angle"
+	@echo "  make -f Makefile test_r128  build build/test_solid_angle_r128"
+	@echo "  make -f Makefile clean      remove build artifacts"
+	@echo ""
+
+mex: $(MEX_OUT)
+
+lib: $(LIB)
 
 test: $(TEST_BIN)
 
@@ -118,17 +142,35 @@ $(BLD_DIR):
 $(BLD_DIR)/%.o: $(SRC_DIR)/%.f90 | $(BLD_DIR)
 	$(FC) $(FFLAGS) -c $< -o $@
 
-$(BLD_DIR)/lq_adaptive.o: $(BLD_DIR)/linequaaadrature_mod.o
+$(BLD_DIR)/hdf5_io.o: $(SRC_DIR)/hdf5_io.c | $(BLD_DIR)
+	$(CC) -c -fPIC $(HDF5_INC) $< -o $@
 
-$(BLD_DIR)/solidangle_mod.o: $(BLD_DIR)/lq_adaptive.o
+$(BLD_DIR)/kernel_mod.o: $(BLD_DIR)/linequaaadrature_mod.o
 
-$(BLD_DIR)/linequaaadrature_mex.o: $(BLD_DIR)/lq_adaptive.o $(BLD_DIR)/solidangle_mod.o
+$(BLD_DIR)/adaptive_mod.o: $(BLD_DIR)/linequaaadrature_mod.o
+
+$(BLD_DIR)/solidangle_mod.o: $(BLD_DIR)/linequaaadrature_mod.o \
+                             $(BLD_DIR)/koorn_geom_mod.o \
+                             $(BLD_DIR)/kernel_mod.o \
+                             $(BLD_DIR)/adaptive_mod.o
+
+$(BLD_DIR)/linequaaadrature_mex.o: $(BLD_DIR)/linequaaadrature_mod.o \
+                                   $(BLD_DIR)/adaptive_mod.o \
+                                   $(BLD_DIR)/solidangle_mod.o \
+                                   $(BLD_DIR)/ellipsoid_mesh_mod.o
+
+$(BLD_DIR)/solidangle_mex.o: $(BLD_DIR)/solidangle_mod.o
+
+$(BLD_DIR)/kernel_mex.o: $(BLD_DIR)/kernel_mod.o $(BLD_DIR)/solidangle_mod.o
+
+$(BLD_DIR)/adaptive_mex.o: $(BLD_DIR)/adaptive_mod.o
 
 # note: module files (.mod) are emitted to BLD_DIR via -J flag
 # TODO: add -J$(BLD_DIR) once modules are non-empty
 
 # ---- static library ----
 $(LIB): $(LQ_OBJECTS)
+	rm -f $@
 	ar rcs $@ $^
 
 # ---- mwrap: two-pass generation ----
@@ -144,11 +186,11 @@ $(MEX_OUT): $(LIB) $(MEX_C)
 	  $(MATLAB_INC) \
 	  $(MEX_C) \
 	  -L$(BLD_DIR) -lLineQuaaadrature \
+	  $(HDF5_LIBS) \
 	  $(MATLAB_LIBS) \
 	  $(OPENBLAS_LIBS) \
-		  -lgfortran -lm \
+		  -lgfortran -lquadmath -lm \
 		  -o $(MEX_OUT)
-# TODO: add -lquadmath here for quad precision
 
 # ---- clean ----
 clean:

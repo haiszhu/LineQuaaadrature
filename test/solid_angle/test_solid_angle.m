@@ -3,7 +3,8 @@
 % 04/07/26 Hai
 
 rootdir = fileparts(mfilename('fullpath'));
-addpath(fullfile(rootdir, '../matlab'))
+addpath(fullfile(rootdir, '../../matlab'))
+addpath(fullfile(rootdir, '../../utils'))
 addpath('~/git/FMM3D/matlab/')
 
 side = 'e';
