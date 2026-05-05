@@ -34,3 +34,31 @@ subroutine lqe_line_integral_r128_mex(m, r0, nbd, sbdnp, nquad,  &
   close (io_unit)
   q_lq64 = real(q_lq128, 8)
 end subroutine lqe_line_integral_r128_mex
+
+! ------------------------------------------------------------------
+! lqs_eval_moments_funvals_mex
+! Thin wrapper around solidangle_mod :: eval_moments_funvals_r64.
+! Output funvals_pre(nbd, ncol, m) stores M moments only.
+! Here ncol = 2*(order+1), matching qotential's momentsalladapt:
+! compute full [N_0..N_{2*order+1} | M_0..M_{2*order+1}], return M.
+! ------------------------------------------------------------------
+subroutine lqs_eval_moments_funvals_mex(m, tx, nbd, sxbd, nquad, order, ncol, &
+                                        funvals_pre)
+  use solidangle_mod, only: eval_moments_funvals_r64
+  implicit none
+  integer(8), intent(in)    :: m, nbd, nquad, order, ncol
+  real(8),    intent(in)    :: tx(3, m)
+  real(8),    intent(in)    :: sxbd(3, nbd)
+  real(8),    intent(inout) :: funvals_pre(nbd, ncol, m)
+
+  real(8), allocatable :: funvals_full(:,:,:)
+  integer(8) :: moment_order
+
+  moment_order = 2_8*order + 1_8
+  allocate(funvals_full(nbd, 2_8*ncol, m))
+
+  call eval_moments_funvals_r64(m, tx, nbd, sxbd, nquad, moment_order, funvals_full)
+  funvals_pre = funvals_full(:, ncol+1_8:2_8*ncol, :)
+
+  deallocate(funvals_full)
+end subroutine lqs_eval_moments_funvals_mex

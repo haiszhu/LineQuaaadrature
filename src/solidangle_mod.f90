@@ -1,5 +1,6 @@
 module solidangle_mod
   use linequaaadrature_mod
+  use iso_c_binding, only: c_long_long
   implicit none
 
 contains
@@ -531,6 +532,174 @@ contains
     
   end subroutine evaluate_line_integral_r128
 
+
+    ! ------------------------------------------------------------------
+  ! eval_moments_funvals_r64
+  ! Strict Fortran port of qotential/demo1.m :: momentsalladapt.
+  !
+  ! Output: funvals_pre(nbd, 2*(order+1), m) — packed [N | M] moments
+  ! at the original source quadrature nodes for each target.
+  !   - root accepted: near-root upsample + line_quad_BrF_r64 with
+  !     KERNEL_MOMENTS_MN; funvals_pre_panel = Br * f_up.
+  !   - root not accepted: moments_kernel_r64 direct at each panel
+  !     source node (no bisection fallback).
+  ! ------------------------------------------------------------------
+  subroutine eval_moments_funvals_r64(m, tx, nbd, sxbd, nquad, order, &
+                                      funvals_pre)
+    use lq_kernel_mod,   only: line_quad_BrF_r64, KERNEL_MOMENTS_MN, &
+                                estimate_nearroot_lengths_r64,        &
+                                build_nearroot_nodes_r64
+    use lq_adaptive_mod, only: line_quad_root_initial_guess_r64,      &
+                                line_quad_root_refine_r64
+
+    integer(8), intent(in)    :: m, nbd, nquad, order
+    real(r64),  intent(in)    :: tx(3, m)
+    real(r64),  intent(in)    :: sxbd(3, nbd)
+    real(r64),  intent(inout) :: funvals_pre(nbd, 2_8*(order+1_8), m)
+
+    ! ---- constants (mirroring momentsalladapt / solid-angle near-root) ----
+    integer(8), parameter :: max_len_each_side = 12_8
+    integer(8), parameter :: maxpan            = 128_8
+    real(r64),  parameter :: rho               = 4.0_r64
+
+    integer(8) :: ncol, npan, n_expa
+    integer(8) :: ell, j, k, idx_start, idx_end, i
+    integer(8) :: len, lenl, lenr, n_up, ifconv
+    real(r64)  :: br_init, br_root
+    complex(8) :: tinit, troot
+    logical    :: accepted
+
+    ! ---- GL quadrature + interp setup (allocated on entry, freed on exit) --
+    real(r64), allocatable :: tgl(:), wgl(:), Dgl(:,:)
+    real(r64), allocatable :: w_bclag(:)
+    real(r64), allocatable :: Legmat(:,:), vtmp(:,:)
+
+    ! ---- per-panel scratch ----
+    real(r64), allocatable :: r_ell(:,:), rp_ell(:,:)            ! (3, nquad)
+    real(r64), allocatable :: xj(:), yj(:), zj(:)                ! (nquad)
+    real(r64), allocatable :: xyz_hat(:,:)                       ! (n_expa, 3)
+
+    ! ---- near-root upsample scratch ----
+    real(r64), allocatable :: t_up(:), w_up(:)                   ! (maxpan*nquad)
+    real(r64), allocatable :: Br(:,:), f_up(:,:)                 ! (nquad, n_up), (n_up, ncol)
+
+    ! ---- naive-branch scratch ----
+    real(r64) :: r_s(3), tau_s(3), kdata_zero(3)
+    real(r64), allocatable :: val_naive(:)                        ! (ncol)
+
+    ! =================================================================
+    ! Setup
+    ! =================================================================
+    npan   = nbd / nquad
+    ncol   = 2_8 * (order + 1_8)
+    n_expa = min(16_8, nquad)
+
+    allocate(tgl(nquad), wgl(nquad), Dgl(nquad,nquad))
+    allocate(w_bclag(nquad))
+    allocate(Legmat(nquad,nquad), vtmp(nquad,nquad))
+
+    call gauss_r64(nquad, tgl, wgl, Dgl)
+    call bclaginterpweights_r64(nquad, tgl, w_bclag)
+    call legeexps_r64(2_8, nquad, tgl, Legmat, vtmp, wgl)
+
+    allocate(r_ell(3,nquad), rp_ell(3,nquad))
+    allocate(xj(nquad), yj(nquad), zj(nquad))
+    allocate(xyz_hat(n_expa, 3))
+
+    allocate(t_up(maxpan*nquad), w_up(maxpan*nquad))
+    allocate(Br(nquad, maxpan*nquad), f_up(maxpan*nquad, ncol))
+    allocate(val_naive(ncol))
+
+    funvals_pre = 0.0_r64
+    kdata_zero  = 0.0_r64
+
+    ! =================================================================
+    ! Per-panel × per-target loop
+    ! =================================================================
+    do ell = 1, npan
+      idx_start = (ell-1_8)*nquad + 1_8
+      idx_end   = ell*nquad
+
+      ! ---- per-panel xyz coords + derivatives + Legendre projection ----
+      r_ell(1,:) = sxbd(1, idx_start:idx_end)
+      r_ell(2,:) = sxbd(2, idx_start:idx_end)
+      r_ell(3,:) = sxbd(3, idx_start:idx_end)
+      xj = r_ell(1,:);  yj = r_ell(2,:);  zj = r_ell(3,:)
+
+      rp_ell(1,:) = matmul(Dgl, xj)
+      rp_ell(2,:) = matmul(Dgl, yj)
+      rp_ell(3,:) = matmul(Dgl, zj)
+
+      xyz_hat(:,1) = matmul(Legmat(1:n_expa,:), xj)
+      xyz_hat(:,2) = matmul(Legmat(1:n_expa,:), yj)
+      xyz_hat(:,3) = matmul(Legmat(1:n_expa,:), zj)
+
+      do j = 1, m
+        ! -------- root finding --------
+        accepted = .false.
+        call line_quad_root_initial_guess_r64(                         &
+             tgl, xj, yj, zj, nquad,                                   &
+             tx(1,j), tx(2,j), tx(3,j), tinit)
+        ! bernstein_radius(re, im) = |z + sqrt(z-1)*sqrt(z+1)|, z = re + i*im
+        br_init = abs(tinit + sqrt(tinit - 1.0_r64)*sqrt(tinit + 1.0_r64))
+
+        if (br_init < 1.5_r64 * rho) then
+          troot  = cmplx(0.0_r64, 0.0_r64, kind=r64)
+          ifconv = 0
+          call line_quad_root_refine_r64(                              &
+               xyz_hat(:,1), xyz_hat(:,2), xyz_hat(:,3), n_expa,       &
+               tx(1,j), tx(2,j), tx(3,j),                              &
+               tinit, troot, ifconv)
+          br_root = abs(troot + sqrt(troot - 1.0_r64)*sqrt(troot + 1.0_r64))
+          if (ifconv == 1 .and. br_root < rho) accepted = .true.
+        end if
+
+        if (accepted) then
+          ! ============ accepted: near-root BrF compress ============
+          call estimate_nearroot_lengths_r64(                          &
+               real(troot, r64), abs(aimag(troot)),                    &
+               max_len_each_side, len, lenl, lenr)
+          n_up = nquad * (len - 1_8)
+          if (n_up > maxpan*nquad) error stop                          &
+            'eval_moments_funvals_r64: n_up exceeds maxpan*nquad'
+
+          call build_nearroot_nodes_r64(                               &
+               real(troot, r64), nquad, tgl, wgl, len, lenl, lenr,     &
+               t_up(1:n_up), w_up(1:n_up))
+
+          call line_quad_BrF_r64(                                      &
+               nquad, n_up, ncol,                                      &
+               r_ell, rp_ell,                                          &
+               tgl, wgl, w_bclag,                                      &
+               t_up(1:n_up), w_up(1:n_up),                             &
+               tx(:, j), kdata_zero, KERNEL_MOMENTS_MN,                &
+               Br(:, 1:n_up), f_up(1:n_up, 1:ncol))
+
+          ! Both halves at once (matches funvals_pre packed [N | M]).
+          funvals_pre(idx_start:idx_end, 1:ncol, j) =                  &
+               matmul(Br(:, 1:n_up), f_up(1:n_up, 1:ncol))
+
+        else
+          ! ============ not accepted: naive direct moments eval ============
+          do k = 1, nquad
+            i = idx_start + k - 1_8
+            r_s   = sxbd(:, i)
+            tau_s = rp_ell(:, k)        ! ignored inside moments_kernel_r64
+            val_naive = 0.0_r64
+            call moments_kernel_r64(r_s, tau_s, tx(:,j), kdata_zero,   &
+                                    ncol, val_naive)
+            funvals_pre(i, 1:ncol, j) = val_naive
+          end do
+        end if
+      end do
+    end do
+
+    deallocate(tgl, wgl, Dgl, w_bclag, Legmat, vtmp)
+    deallocate(r_ell, rp_ell, xj, yj, zj, xyz_hat)
+    deallocate(t_up, w_up, Br, f_up, val_naive)
+
+  end subroutine eval_moments_funvals_r64
+
   ! ------------------------------------------------------------------
   ! asvestas_kernel_r64  (bind(C) enables c_funloc + dlsym lookup)
   ! kdata(1:3) = qhat
@@ -588,6 +757,75 @@ contains
       val = 0.0_r64
     end select
   end subroutine invr_kernel_r64
+
+  ! ------------------------------------------------------------------
+  ! moments_kernel_r64  (vector bind(C) kernel)
+  ! kdata(2) = flag
+  ! dim = 2*(order+1)
+  ! val = [N_0..N_order, M_0..M_order] at one source point
+  ! ------------------------------------------------------------------
+  subroutine moments_kernel_r64(r_s, tau_s, r0j, kdata, dim, val) bind(C)
+    real(r64), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata(3)
+    integer(c_long_long), value :: dim
+    real(r64), intent(inout) :: val(dim)
+
+    integer(8) :: order, flag, k
+    real(r64) :: r0norm, r0norm_inv
+    real(r64) :: r0dotr, rnorm, rnorm_inv, rnorm2_inv
+    real(r64) :: r0dotr_over_rnorm2, r0norm2_over_rnorm2
+    real(r64) :: r0mr_vec(3), r0mr, r0mr_inv, r0mr_over_rnorm2
+    real(r64) :: r0dotr0mr_over_r0mr, rdotr0mr_over_r0mr
+    real(r64) :: denominator1, denominator2, LMNcommon
+    real(r64) :: LMcommon, r0normplusrnorm
+
+    order = dim/2_8 - 1_8
+    flag = nint(kdata(2), 8)
+    val = 0.0_r64
+
+    r0dotr = r0j(1)*r_s(1) + r0j(2)*r_s(2) + r0j(3)*r_s(3)
+    rnorm = sqrt(r_s(1)**2 + r_s(2)**2 + r_s(3)**2)
+    r0norm = sqrt(r0j(1)**2 + r0j(2)**2 + r0j(3)**2)
+    rnorm_inv = 1.0_r64/rnorm
+    rnorm2_inv = rnorm_inv**2
+    r0norm_inv = 1.0_r64/r0norm
+    r0dotr_over_rnorm2 = r0dotr*rnorm2_inv
+    r0norm2_over_rnorm2 = r0norm**2*rnorm2_inv
+    r0normplusrnorm = r0norm+rnorm
+
+    r0mr_vec = r0j - r_s
+    r0mr = sqrt(r0mr_vec(1)**2 + r0mr_vec(2)**2 + r0mr_vec(3)**2)
+    r0mr_over_rnorm2 = r0mr*rnorm2_inv
+    r0mr_inv = 1.0_r64/r0mr
+
+    r0dotr0mr_over_r0mr = (r0j(1)*r0mr_vec(1) + r0j(2)*r0mr_vec(2) + &
+                           r0j(3)*r0mr_vec(3))*r0mr_inv
+    denominator1 = r0norm + r0dotr0mr_over_r0mr
+    rdotr0mr_over_r0mr = (r_s(1)*r0mr_vec(1) + r_s(2)*r0mr_vec(2) + &
+                          r_s(3)*r0mr_vec(3))*r0mr_inv
+    denominator2 = rnorm + rdotr0mr_over_r0mr
+    LMNcommon = r0normplusrnorm/(denominator1+denominator2)
+
+    val(1) = log((r0normplusrnorm+r0mr)*LMNcommon*r0mr_inv)*rnorm_inv
+    if (order >= 1_8) then
+      val(2) = val(1)*r0dotr_over_rnorm2 + (r0mr-r0norm)*rnorm2_inv
+    end if
+    do k=2_8,order
+      val(k+1_8) = real(2_8*k-1_8,r64)/real(k,r64)*r0dotr_over_rnorm2*val(k) - &
+                   real(k-1_8,r64)/real(k,r64)*r0norm2_over_rnorm2*val(k-1_8) + &
+                   1.0_r64/real(k,r64)*r0mr_over_rnorm2
+    end do
+
+    LMcommon = 1.0_r64/(r0norm*rnorm+r0dotr)
+    val(order+2_8) = LMNcommon*LMcommon*(((r0normplusrnorm)*r0mr_inv+rnorm*r0norm_inv)* &
+                       r0mr_inv-r0norm_inv)
+    if (order >= 1_8) then
+      val(order+3_8) = r0norm*val(order+2_8)/(r0norm+r0mr)
+    end if
+    do k=2_8,order
+      val(order+2_8+k) = (r0dotr*val(order+1_8+k) + real(k-1_8,r64)*val(k-1_8) - &
+                          r0mr_inv)*rnorm2_inv
+    end do
+  end subroutine moments_kernel_r64
 
   subroutine invr_kernel_r128(r_s, tau_s, r0j, kdata, val)
     real(r128), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata(3)

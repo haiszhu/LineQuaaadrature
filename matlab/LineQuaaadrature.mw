@@ -548,6 +548,24 @@ end
 # FORTRAN lqe_line_integral_r128_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, int[1] fptr_int, double[3,m] kdata, inout double[m] q_lq64);
 end
 
+@function [funvals_pre] = lqs_eval_moments_funvals_mex(m, tx, nbd, sxbd, nquad, order, ncol, funvals_pre)
+m = double(m);
+nbd = double(nbd);
+nquad = double(nquad);
+order = double(order);
+ncol = double(ncol);
+nbdncol = nbd*ncol;
+tx = double(reshape(tx, 3, m));
+sxbd = double(reshape(sxbd, 3, nbd));
+if nargin < 8 || isempty(funvals_pre)
+  funvals_pre = zeros(nbdncol, m);
+else
+  funvals_pre = double(reshape(funvals_pre, [nbdncol, m]));
+end
+# FORTRAN lqs_eval_moments_funvals_mex(int[1] m, double[3,m] tx, int[1] nbd, double[3,nbd] sxbd, int[1] nquad, int[1] order, int[1] ncol, inout double[nbdncol,m] funvals_pre);
+funvals_pre = double(reshape(funvals_pre, [nbd, ncol, m]));
+end
+
 % --------------------------------------------------------------------------
 % line_quad_compress_nearroot_mex: nearroot GL weight compression.
 %

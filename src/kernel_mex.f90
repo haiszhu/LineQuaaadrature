@@ -13,6 +13,41 @@ subroutine lqk_estimate_nearroot_lengths_mex(t_root, root_imag_abs, max_len_each
   call estimate_nearroot_lengths_r64(t_root, root_imag_abs, max_len_each_side, len, lenl, lenr)
 end subroutine lqk_estimate_nearroot_lengths_mex
 
+subroutine lqk_build_nearroot_nodes_mex(t_root, nquad, tgl, wgl, len, lenl, lenr, t_up, w_up)
+  use lq_kernel_mod, only: build_nearroot_nodes_r64
+  implicit none
+  real(8),    intent(in)    :: t_root
+  integer(8), intent(in)    :: nquad, len, lenl, lenr
+  real(8),    intent(in)    :: tgl(nquad), wgl(nquad)
+  real(8),    intent(inout) :: t_up(nquad*(len-1)), w_up(nquad*(len-1))
+
+  call build_nearroot_nodes_r64(t_root, nquad, tgl, wgl, len, lenl, lenr, t_up, w_up)
+end subroutine lqk_build_nearroot_nodes_mex
+
+subroutine lqk_line_quad_BrF_mex(nquad, n_up, ncol, &
+                                 r_ell, rp_ell, &
+                                 tgl, wgl, w_bclag, &
+                                 t_up, w_up, &
+                                 r0j, kdata, kernel_id, &
+                                 Br, integrand0_up)
+  use lq_kernel_mod, only: line_quad_BrF_r64
+  implicit none
+  integer(8), intent(in)    :: nquad, n_up, ncol, kernel_id
+  real(8),    intent(in)    :: r_ell(3,nquad), rp_ell(3,nquad)
+  real(8),    intent(in)    :: tgl(nquad), wgl(nquad), w_bclag(nquad)
+  real(8),    intent(in)    :: t_up(n_up), w_up(n_up)
+  real(8),    intent(in)    :: r0j(3), kdata(3)
+  real(8),    intent(inout) :: Br(nquad, n_up)
+  real(8),    intent(inout) :: integrand0_up(n_up, ncol)
+
+  call line_quad_BrF_r64(nquad, n_up, ncol, &
+                         r_ell, rp_ell, &
+                         tgl, wgl, w_bclag, &
+                         t_up, w_up, &
+                         r0j, kdata, kernel_id, &
+                         Br, integrand0_up)
+end subroutine lqk_line_quad_BrF_mex
+
 subroutine lqk_build_nearroot_panels_local_mex( t0, nquad, npan, lenl, lenr, tgl, wgl, &
                                             xjhat, yjhat, zjhat, rbase, &
                                             tpan, upan, wpan, &
@@ -278,7 +313,7 @@ subroutine line_quad_compress_mex(m, r0, nbd, sbdnp, nquad,      &
             cfptr, kdata, funvals, sxbdw)
 end subroutine line_quad_compress_mex
 
-subroutine lqk_compress_nearroot_mex(m, r0, nbd, sbdnp, nquad,  &
+subroutine lqk_line_quad_compress_nearroot_mex(m, r0, nbd, sbdnp, nquad,  &
                                      sxbd, sxpbd, stangbd, sspbd,       &
                                      tgl, wgl, Dgl, w_bclag,            &
                                      Legmat, bclagmatlr,                 &
@@ -308,12 +343,15 @@ subroutine lqk_compress_nearroot_mex(m, r0, nbd, sbdnp, nquad,  &
   do j = 1, m
     root_ok(j) = (root_ok_i(j) /= 0_8)
   end do
-  call lqqcn(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, &
-              tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr,             &
-              cfptr, kdata, funvals, sxbdw, root_re, root_im, root_ok)
-end subroutine lqk_compress_nearroot_mex
+  call lqqcn(m, r0, nbd, sbdnp, nquad, & 
+            sxbd, sxpbd, stangbd, sspbd, &
+            tgl, wgl, Dgl, w_bclag, &
+            Legmat, bclagmatlr, &
+            cfptr, kdata, funvals, sxbdw, &
+            root_re, root_im, root_ok)
+end subroutine lqk_line_quad_compress_nearroot_mex
 
-subroutine lqk_compress_nearroot_r128_mex(m, r0, nbd, sbdnp, nquad,  &
+subroutine lqk_line_quad_compress_nearroot_r128_mex(m, r0, nbd, sbdnp, nquad,  &
                                      sxbd, sxpbd, stangbd, sspbd,       &
                                      tgl, wgl, Dgl, w_bclag,            &
                                      Legmat, bclagmatlr,                 &
@@ -391,7 +429,7 @@ subroutine lqk_compress_nearroot_r128_mex(m, r0, nbd, sbdnp, nquad,  &
                                           nquad*sbdnp, m)
   funvals = real(funvals_r128, 8)
   sxbdw = real(sxbdw_r128, 8)
-end subroutine lqk_compress_nearroot_r128_mex
+end subroutine lqk_line_quad_compress_nearroot_r128_mex
 
 
 subroutine lqk_eval_compress_nearroot_r128_mex(m, r0, nbd, sbdnp, nquad,  &

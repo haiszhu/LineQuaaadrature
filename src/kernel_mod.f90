@@ -4,7 +4,7 @@
 ! Caller constructs c_funptr from integer(8) handle before calling.
 
 module lq_kernel_mod
-  use iso_c_binding, only: c_funptr, c_f_procpointer, c_double
+  use iso_c_binding, only: c_funptr, c_f_procpointer, c_double, c_long_long
   use linequaaadrature_mod, only: gauss_r64, gauss_r128, bclaginterpweights_r64, bclaginterpweights_r128
   implicit none
 
@@ -23,9 +23,13 @@ module lq_kernel_mod
   !      with the inline r128 formula.
   !   3. Have the caller of line_quad_compress_nearroot_r64 pass
   !      kernel_id=KERNEL_<NAME>.
+  !   4. Scalar kernels write integrand0_up(i, 1); vector-output
+  !      kernels expect ncol > 1 and write integrand0_up(i, 1:ncol).
+  !      Existing INVR/ASVESTAS callers keep ncol=1.
   ! ----------------------------------------------------------------
-  integer(8), parameter :: KERNEL_INVR     = 0_8   ! 1/|r-r0|^p, kdata(1)=p in {1,3,5}
-  integer(8), parameter :: KERNEL_ASVESTAS = 1_8   ! Asvestas solid-angle kernel, kdata(1:3)=qhat
+  integer(8), parameter :: KERNEL_INVR        = 0_8   ! 1/|r-r0|^p, kdata(1)=p in {1,3,5}
+  integer(8), parameter :: KERNEL_ASVESTAS    = 1_8   ! Asvestas solid-angle kernel, kdata(1:3)=qhat
+  integer(8), parameter :: KERNEL_MOMENTS_MN  = 2_8   ! Line-segment moments; ncol=2*(order+1), packed [N|M]; kdata unused
 
   logical :: lq_profile_enabled_r64 = .false.
   integer(8) :: lq_profile_kernel_eval_calls_r64 = 0_8
@@ -54,6 +58,15 @@ module lq_kernel_mod
       real(c_double), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata3(3)
       real(c_double), intent(inout) :: val
     end subroutine kernel_iface_r64
+  end interface
+
+  abstract interface
+    subroutine kernel_vec_iface_r64(r_s, tau_s, r0j, kdata3, dim, val) bind(C)
+      import c_double, c_long_long
+      real(c_double), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata3(3)
+      integer(c_long_long), value   :: dim
+      real(c_double), intent(inout) :: val(dim)
+    end subroutine kernel_vec_iface_r64
   end interface
 
   abstract interface
@@ -891,20 +904,20 @@ contains
   !      with the inline r128 formula.
   !   3. caller of compress_nearroot_r64 passes kernel_id=KERNEL_<NAME>.
   ! ----------------------------------------------------------------
-  subroutine line_quad_BrF_r64(nquad, n_up, &
+  subroutine line_quad_BrF_r64(nquad, n_up, ncol, &
                                r_ell, rp_ell, &
                                tgl, wgl, w_bclag, &
                                t_up, w_up, &
                                r0j, kdata, kernel_id, &
                                Br, integrand0_up)
-    integer(8), intent(in)  :: nquad, n_up
+    integer(8), intent(in)  :: nquad, n_up, ncol
     real(r64),  intent(in)  :: r_ell(3,nquad), rp_ell(3,nquad)
     real(r64),  intent(in)  :: tgl(nquad), wgl(nquad), w_bclag(nquad)
     real(r64),  intent(in)  :: t_up(n_up), w_up(n_up)
     real(r64),  intent(in)  :: r0j(3), kdata(3)
     integer(8), intent(in)  :: kernel_id
     real(r64),  intent(out) :: Br(nquad, n_up)
-    real(r64),  intent(out) :: integrand0_up(n_up)
+    real(r64),  intent(out) :: integrand0_up(n_up, ncol)
 
     integer(8) :: i, k
     real(r128) :: r_t128(3), rp_t128(3), sp_t128, tau_t128(3)
@@ -914,6 +927,7 @@ contains
     real(r128) :: row128(nquad)
     integer(8) :: power_int, hit_idx
     real(r128) :: r0j128(3), kdata128(3)
+    real(r128) :: r0norm128
     real(r128) :: tgl128(nquad), wgl128(nquad), wgl_inv128(nquad), w_bclag128(nquad)
     real(r128) :: r_ell128(3,nquad), rp_ell128(3,nquad)
     real(r128) :: t_up128(n_up), w_up128(n_up)
@@ -928,6 +942,7 @@ contains
     w_up128(1:n_up) = real(w_up(1:n_up), r128)
     wgl_inv128 = 1.0_r128 / wgl128
     call bclaginterpweights_r128(nquad, tgl128, w_bclag128)
+    r0norm128 = sqrt(r0j128(1)**2 + r0j128(2)**2 + r0j128(3)**2)
 
     ! Precompute kernel-specific loop-invariants outside the i loop.
     power_int = 0_8
@@ -994,6 +1009,7 @@ contains
         case default
           val128 = 0.0_r128
         end select
+        integrand0_up(i, 1) = real(val128, r64)
       case (KERNEL_ASVESTAS)
         ! val = -[tau_s . (qhat x rhat)] / [|r| * (1 - qhat.rhat)]
         sp_t128  = sqrt(rp_t128(1)**2 + rp_t128(2)**2 + rp_t128(3)**2)
@@ -1005,12 +1021,88 @@ contains
         qdotrhat128      = qhat128(1)*rhat128(1) + qhat128(2)*rhat128(2) + qhat128(3)*rhat128(3)
         val128 = -(tau_t128(1)*qcrossrhat128(1) + tau_t128(2)*qcrossrhat128(2) + tau_t128(3)*qcrossrhat128(3)) &
                  / (rdist128 * (1.0_r128 - qdotrhat128))
+        integrand0_up(i, 1) = real(val128, r64)
+      case (KERNEL_MOMENTS_MN)
+        ! Line-segment moments {N_0..N_order, M_0..M_order} packed
+        ! [N|M] in val128(1..ncol), with ncol = 2*(order+1).
+        ! Recurrence math: src/qotential_legacy_mod.f90 :: moments_r64.
+        block
+          integer(8) :: order_loc, kk
+          real(r128) :: val128(ncol)        ! shadows outer scalar val128
+          real(r128) :: rnorm128, rnorm_inv128, rnorm2_inv128
+          real(r128) :: r0dotr128, r0dotr_over_rnorm2_128
+          real(r128) :: r0norm2_over_rnorm2_128
+          real(r128) :: r0mr_inv128, r0mr_over_rnorm2_128
+          real(r128) :: r0normplusrnorm128
+          real(r128) :: r0dotr0mr_over_r0mr128, rdotr0mr_over_r0mr128
+          real(r128) :: denominator1_128, denominator2_128
+          real(r128) :: LMNcommon128, LMcommon128
+
+          order_loc = ncol/2_8 - 1_8
+
+          rnorm128       = sqrt(r_t128(1)**2 + r_t128(2)**2 + r_t128(3)**2)
+          rnorm_inv128   = 1.0_r128 / rnorm128
+          rnorm2_inv128  = rnorm_inv128 * rnorm_inv128
+          r0dotr128      = r0j128(1)*r_t128(1) + r0j128(2)*r_t128(2) &
+                         + r0j128(3)*r_t128(3)
+          r0dotr_over_rnorm2_128  = r0dotr128 * rnorm2_inv128
+          r0norm2_over_rnorm2_128 = (r0norm128 * r0norm128) * rnorm2_inv128
+          r0mr_inv128             = 1.0_r128 / rdist128            ! r0mr ≡ rdist128
+          r0mr_over_rnorm2_128    = rdist128 * rnorm2_inv128
+          r0normplusrnorm128      = r0norm128 + rnorm128
+
+          r0dotr0mr_over_r0mr128 = (r0j128(1)*(r0j128(1)-r_t128(1)) + &
+                                    r0j128(2)*(r0j128(2)-r_t128(2)) + &
+                                    r0j128(3)*(r0j128(3)-r_t128(3))) * r0mr_inv128
+          denominator1_128 = r0norm128 + r0dotr0mr_over_r0mr128
+          rdotr0mr_over_r0mr128 = (r_t128(1)*(r0j128(1)-r_t128(1)) + &
+                                   r_t128(2)*(r0j128(2)-r_t128(2)) + &
+                                   r_t128(3)*(r0j128(3)-r_t128(3))) * r0mr_inv128
+          denominator2_128 = rnorm128 + rdotr0mr_over_r0mr128
+          LMNcommon128 = r0normplusrnorm128 / (denominator1_128 + denominator2_128)
+
+          ! N0 -> val128(1)
+          val128(1) = log((r0normplusrnorm128 + rdist128) * LMNcommon128 * r0mr_inv128) &
+                      * rnorm_inv128
+          ! N1 -> val128(2) (only if order >= 1)
+          if (order_loc >= 1_8) then
+            val128(2) = val128(1) * r0dotr_over_rnorm2_128 &
+                      + (rdist128 - r0norm128) * rnorm2_inv128
+          end if
+          ! N recurrence k=2..order_loc -> val128(k+1)
+          do kk = 2_8, order_loc
+            val128(kk+1) = real(2_8*kk - 1_8, r128) / real(kk, r128)        &
+                             * r0dotr_over_rnorm2_128 * val128(kk)          &
+                         - real(kk - 1_8,    r128) / real(kk, r128)         &
+                             * r0norm2_over_rnorm2_128 * val128(kk-1)       &
+                         + 1.0_r128 / real(kk, r128) * r0mr_over_rnorm2_128
+          end do
+
+          ! M0 -> val128(order_loc+2)
+          LMcommon128 = 1.0_r128 / (r0norm128 * rnorm128 + r0dotr128)
+          val128(order_loc + 2_8) = LMNcommon128 * LMcommon128 *                            &
+              (((r0normplusrnorm128) * r0mr_inv128 + rnorm128 / r0norm128) * r0mr_inv128 &
+               - 1.0_r128 / r0norm128)
+          ! M1 -> val128(order_loc+3) (only if order >= 1)
+          if (order_loc >= 1_8) then
+            val128(order_loc + 3_8) = r0norm128 * val128(order_loc + 2_8) &
+                                      / (r0norm128 + rdist128)
+          end if
+          ! M recurrence k=2..order_loc -> val128(order_loc+2+k); reads N_{k-2} = val128(k-1)
+          do kk = 2_8, order_loc
+            val128(order_loc + 2_8 + kk) = (r0dotr128 * val128(order_loc + 1_8 + kk) +    &
+                                            real(kk - 1_8, r128) * val128(kk - 1_8) -    &
+                                            r0mr_inv128) * rnorm2_inv128
+          end do
+
+          integrand0_up(i, :) = real(val128, r64)
+        end block
       case default
         val128 = 0.0_r128
+        integrand0_up(i, 1) = real(val128, r64)
       end select
 
       Br(:,i) = real(w_up128(i) * wgl_inv128 * row128, r64)
-      integrand0_up(i) = real(val128, r64)
     end do
 
   end subroutine line_quad_BrF_r64
@@ -1052,7 +1144,7 @@ contains
     real(r64)  :: row(nquad), wgl_inv(nquad)
     real(r64)  :: t_up(maxpan*nquad), w_up(maxpan*nquad), f_up(maxpan*nquad)
     real(r64)  :: sp_up, Br(nquad,maxpan*nquad)
-    real(r64)  :: integrand0_up(maxpan*nquad), integrand0_compress(nquad)
+    real(r64)  :: integrand0_up(maxpan*nquad,1), integrand0_compress(nquad)
     real(r64), allocatable :: tgl2(:), wgl2(:), Dgl2(:,:)
     procedure(kernel_iface_r64), pointer :: fptr
 
@@ -1100,11 +1192,11 @@ contains
           ! because the cancellation-prone barycentric step is what we
           ! want in r128, and the matching r128 kernel formula is
           ! inlined inside BrF.
-          call line_quad_BrF_r64(nquad, n_up, r_ell, rp_ell,         &
+          call line_quad_BrF_r64(nquad, n_up, 1_8, r_ell, rp_ell,    &
                                  tgl, wgl, w_bclag,                  &
                                  t_up(1:n_up), w_up(1:n_up),         &
                                  r0(:,j), kdata(:,j), k_id,          &
-                                 Br(:,1:n_up), integrand0_up(1:n_up))
+                                 Br(:,1:n_up), integrand0_up(1:n_up,1:1))
           ! block
           !   real(r128) :: r_t128(3), rp_t128(3), sp_t128
           !   real(r128) :: dx128, dy128, dz128, r2_128, rinv128, val128
@@ -1184,7 +1276,7 @@ contains
           ! end block
 
           do k = 1, nquad
-            integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up))
+            integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up,1))
             if (abs(funvals(k,ell,j)) > 0.0_r64) then
               sxbdw(k,ell,j) = integrand0_compress(k) * sp_ell(k) / funvals(k,ell,j) * wgl(k)
             else
@@ -1296,12 +1388,12 @@ contains
           do i = 1, n_up
             call bary_row_r64(nquad, tgl, w_bclag, t_up(i), row)
             sp_up = sqrt(sum((matmul(rp_ell, row))**2))
-            integrand0_up(i) = f_up(i) / sp_up
+            integrand0_up(i,1) = f_up(i) / sp_up
             Br(:,i) = w_up(i) * wgl_inv * row
           end do
 
           do k = 1, nquad
-            integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up))
+            integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up,1))
             if (abs(funvals(k,ell,j)) > 0.0_r64) then
               sxbdw(k,ell,j) = integrand0_compress(k) * sp_ell(k) / funvals(k,ell,j) * wgl(k)
             else
@@ -1390,7 +1482,7 @@ contains
         do i = 1, n_up
           call bary_row_r64(nquad, tgl, w_bclag, t_up(i), row)
           sp_up = sqrt(sum((matmul(rp_ell, row))**2))
-          integrand0_up(i) = f_up(i) / sp_up
+          integrand0_up(i,1) = f_up(i) / sp_up
           Br(:,i) = w_up(i) * wgl_inv * row
         end do
         call system_clock(c1)
@@ -1399,7 +1491,7 @@ contains
         
         call system_clock(c0)
         do k = 1, nquad
-          integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up))
+          integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up,1))
         end do
         call system_clock(c1)
         lq_profile_compress_sec_r64 = lq_profile_compress_sec_r64 + &
