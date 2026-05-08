@@ -17,18 +17,3 @@ mex_id_ = 'lqs_eval_moments_funvals_mex(c i int64_t[x], c i double[xx], c i int6
 funvals_pre = double(reshape(funvals_pre, [nbd, ncol, m]));
 end
 
-% --------------------------------------------------------------------------
-% line_quad_compress_nearroot_mex: nearroot GL weight compression.
-%
-% [funvals, sxbdw] = line_quad_compress_nearroot_mex(
-%     m, r0, nbd, sbdnp, nquad,
-%     sxbd, sxpbd, stangbd, sspbd,
-%     tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr,
-%     fptr_int, kdata, funvals, sxbdw,
-%     root_re, root_im, root_ok)
-%
-% root_re(m)  : real part of nearest singularity in parameter [-1,1]
-% root_im(m)  : imaginary part (distance from real axis)
-% root_ok(m)  : nonzero = use nearroot path; 0 = fall back to adaptive
-% funvals, sxbdw: (nquad*sbdnp) x m here; Fortran sees (nquad,sbdnp,m).
-% --------------------------------------------------------------------------

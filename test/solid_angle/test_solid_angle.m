@@ -120,6 +120,7 @@ for k=1:ntri
     %
     IalphaAsvestas = zeros(ntc,1);
     IalphaAsvestas = evaluate_solid_angle_integral_mex(ntc, tcj.x, len, sjx, sjn, sjw, tri_vert(:,:,k), 3*nquad_bdry, sjxbd, use_nearroot, IalphaAsvestas); 
+    % IalphaAsvestas = lqs_evaluate_solid_angle_integral(ntc, tcj.x, len, sjx, sjn, sjw, tri_vert(:,:,k), 3*nquad_bdry, sjxbd, use_nearroot, IalphaAsvestas); 
     K_ij_naive = Lap3dDLPmat(tcj,sj);
     K_Atcxvec(idxc) = K_Atcxvec(idxc) - 1/(4*pi)*IalphaAsvestas - K_ij_naive*ones(len,1);
     % keyboard

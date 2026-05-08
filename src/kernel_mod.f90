@@ -151,6 +151,54 @@ contains
 
   end subroutine line_kernel_eval_r64
 
+  ! ----------------------------------------------------------------
+  ! line_kernel_eval_vec_r64
+  ! Vector-output sibling of line_kernel_eval_r64.
+  ! fun: c_funptr to subroutine(r_s(3), tau_s(3), r0j(3), kdata3(3),
+  !                              dim, val(dim))   bind(C)
+  ! dim:  per-source-point output length (== ncol for moments).
+  ! funvals(nquad, sbdnp, dim, m): pure kernel value at each node.
+  !
+  ! Convention note: unlike the scalar line_kernel_eval_r64 (which
+  ! returns kernel*sp), this routine does NOT apply the curve-speed
+  ! factor. Vector kernels (e.g. moments) are paired with downstream
+  ! formulas that supply the line-element factor explicitly via spj,
+  ! matching the q_moments_mex convention.
+  ! ----------------------------------------------------------------
+  subroutine line_kernel_eval_vec_r64(m, r0, nbd, sbdnp, nquad, dim, &
+                                       sxbd, sxpbd, stangbd,         &
+                                       fun, kdata, funvals)
+    use iso_c_binding, only: c_long_long
+    integer(8),     intent(in)    :: m, nbd, sbdnp, nquad, dim
+    real(r64),      intent(in)    :: r0(3,m)
+    real(r64),      intent(in)    :: sxbd(3,nbd), sxpbd(3,nbd), stangbd(3,nbd)
+    type(c_funptr), value         :: fun
+    real(r64),      intent(in)    :: kdata(3,m)
+    real(r64),      intent(inout) :: funvals(nquad, sbdnp, dim, m)
+
+    procedure(kernel_vec_iface_r64), pointer :: fptr
+    integer(8) :: ell, j, q, idx
+    real(r64)  :: r_s(3), tau_s(3)
+    real(r64)  :: val(dim)
+    integer(c_long_long) :: dim_c
+
+    call c_f_procpointer(fun, fptr)
+    dim_c = int(dim, c_long_long)
+
+    do ell = 1, sbdnp
+      do q = 1, nquad
+        idx   = (ell-1)*nquad + q
+        r_s   = sxbd(:, idx)
+        tau_s = stangbd(:, idx)
+        do j = 1, m
+          val = 0.0_r64
+          call fptr(r_s, tau_s, r0(:,j), kdata(:,j), dim_c, val)
+          funvals(q, ell, :, j) = val
+        end do
+      end do
+    end do
+  end subroutine line_kernel_eval_vec_r64
+
   subroutine line_kernel_eval_local_r64(nquad, npan, &
                                       xdisp, ydisp, zdisp, stangpan, sppan, dswpan, &
                                       target_loc, fun, kdata, &
@@ -885,39 +933,308 @@ contains
   !
   ! Build the per-target compression matrix row Br(:,i) and the
   ! reference integrand value integrand0_up(i) at each refined node
-  ! t_up(i), with the barycentric Lagrange interpolation AND the
-  ! kernel evaluation done in r128.
+  ! t_up(i), with the barycentric Lagrange interpolation and the
+  ! kernel evaluation done in r64.
   !
-  ! Why r128 internally: the geometry (r_t, rp_t) at t_up is built
-  ! from r_ell/rp_ell via a barycentric Lagrange row, which is
-  ! cancellation-prone near the GL nodes. Doing it in r128 stops
-  ! that, and once we have r_t128 in r128 the kernel value is also
-  ! cheap to keep in r128.
+  ! KERNEL_INVR uses a local-coordinate shift around the real part
+  ! of the singularity location, root_re. The bary inputs are
+  ! pre-shifted (tgl_local = tgl - root_re, clamped at +/-1 if
+  ! root_re is outside the panel), bary weights w_bclag_local are
+  ! recomputed from tgl_local, and the geometry is accumulated as
+  !   rvec = sum_k row(k) * (r_ell(:,k) - r0j(:))
+  ! directly. This keeps every cancellation operand at the same
+  ! small magnitude as the singularity and avoids the catastrophic
+  ! R_t - r0j subtraction that the previous r128 path was paying
+  ! to suppress. root_im is currently unused; reserved so callers
+  ! can pass full complex root information without another API
+  ! change later.
   !
-  ! kernel_id selects which inline r128 kernel formula to use.
-  ! BrF cannot go through the user-supplied r64 callback fptr,
-  ! since that would silently downcast r_t128 -> r64 and lose the
-  ! r128 advantage; instead, the supported kernels are reproduced
-  ! in r128 in the dispatch below. To add a new kernel:
+  ! ASVESTAS / MOMENTS_MN / default branches keep the existing
+  ! un-shifted bary-row and r_t/rp_t accumulation. Their precision
+  ! profile is unchanged by the new INVR path.
+  !
+  ! kernel_id selects which inline r64 kernel formula to use. To
+  ! add a new kernel:
   !   1. add a KERNEL_<NAME> parameter near the top of lq_kernel_mod.
-  !   2. add a `case (KERNEL_<NAME>)` branch in the dispatch below
-  !      with the inline r128 formula.
+  !   2. add a `case (KERNEL_<NAME>)` branch in the dispatch below.
   !   3. caller of compress_nearroot_r64 passes kernel_id=KERNEL_<NAME>.
   ! ----------------------------------------------------------------
   subroutine line_quad_BrF_r64(nquad, n_up, ncol, &
                                r_ell, rp_ell, &
                                tgl, wgl, w_bclag, &
                                t_up, w_up, &
-                               r0j, kdata, kernel_id, &
+                               r0j, root_re, root_im, kdata, kernel_id, &
                                Br, integrand0_up)
     integer(8), intent(in)  :: nquad, n_up, ncol
     real(r64),  intent(in)  :: r_ell(3,nquad), rp_ell(3,nquad)
     real(r64),  intent(in)  :: tgl(nquad), wgl(nquad), w_bclag(nquad)
     real(r64),  intent(in)  :: t_up(n_up), w_up(n_up)
     real(r64),  intent(in)  :: r0j(3), kdata(3)
+    real(r64),  intent(in)  :: root_re, root_im
     integer(8), intent(in)  :: kernel_id
     real(r64),  intent(out) :: Br(nquad, n_up)
     real(r64),  intent(out) :: integrand0_up(n_up, ncol)
+
+    integer(8) :: i, k
+    real(r64) :: r_t128(3), rp_t128(3), sp_t128, tau_t128(3)
+    real(r64) :: rvec128(3), rdist128, rinv128, val128
+    real(r64) :: rhat128(3), qhat128(3), qcrossrhat128(3), qdotrhat128
+    real(r64) :: eps_hit128, denom128
+    real(r64) :: row128(nquad)
+    integer(8) :: power_int, hit_idx
+    real(r64) :: r0j128(3), kdata128(3)
+    real(r64) :: r0norm128
+    real(r64) :: tgl128(nquad), wgl128(nquad), wgl_inv128(nquad), w_bclag128(nquad)
+    real(r64) :: r_ell128(3,nquad), rp_ell128(3,nquad)
+    real(r64) :: t_up128(n_up), w_up128(n_up)
+    ! INVR-only local-coordinate arrays (shifted to put the singularity at 0).
+    real(r64) :: tgl_local(nquad), t_up_local(n_up), w_bclag_local(nquad)
+
+    kdata128 = real(kdata, r64)
+    r0j128 = real(r0j, r64)
+    tgl128 = real(tgl, r64)
+    wgl128 = real(wgl, r64)
+    r_ell128 = real(r_ell, r64)
+    rp_ell128 = real(rp_ell, r64)
+    t_up128(1:n_up) = real(t_up(1:n_up), r64)
+    w_up128(1:n_up) = real(w_up(1:n_up), r64)
+    wgl_inv128 = 1.0_r64 / wgl128
+    call bclaginterpweights_r64(nquad, tgl128, w_bclag128)
+    r0norm128 = sqrt(r0j128(1)**2 + r0j128(2)**2 + r0j128(3)**2)
+
+    ! INVR local-coordinate shift: bring the singularity to t=0 in
+    ! the bary inputs. Clamp at +/-1 when root_re is outside [-1,1].
+    ! root_im is intentionally unused here (reserved for API parity).
+    if (root_re >= 1.0_r64) then
+      tgl_local          = tgl128             - 1.0_r64
+      t_up_local(1:n_up) = t_up128(1:n_up)    - 1.0_r64
+    else if (root_re <= -1.0_r64) then
+      tgl_local          = tgl128             + 1.0_r64
+      t_up_local(1:n_up) = t_up128(1:n_up)    + 1.0_r64
+    else
+      tgl_local          = tgl128             - root_re
+      t_up_local(1:n_up) = t_up128(1:n_up)    - root_re
+    end if
+    call bclaginterpweights_r64(nquad, tgl_local, w_bclag_local)
+
+    ! Precompute kernel-specific loop-invariants outside the i loop.
+    power_int = 0_8
+    qhat128   = 0.0_r64
+    select case (kernel_id)
+    case (KERNEL_INVR)
+      power_int = nint(real(kdata128(1), 8))
+    case (KERNEL_ASVESTAS)
+      qhat128 = kdata128(1:3)
+    end select
+
+    eps_hit128 = 10.0_r64 * epsilon(1.0_r64)
+    do i = 1, n_up
+      if (kernel_id == KERNEL_INVR) then
+        ! ----- INVR: local-shifted bary, direct rvec accumulation -----
+        ! Hit threshold matches utils/lqk_line_quad_BrF.m: bare epsilon
+        ! is enough since tgl_local has the singularity at 0.
+        hit_idx = 0_8
+        do k = 1, nquad
+          if (abs(t_up_local(i) - tgl_local(k)) <= epsilon(1.0_r64)) then
+            hit_idx = k
+            exit
+          end if
+        end do
+        if (hit_idx > 0_8) then
+          row128 = 0.0_r64
+          row128(hit_idx) = 1.0_r64
+          rvec128(1) = r_ell128(1, hit_idx) - r0j128(1)
+          rvec128(2) = r_ell128(2, hit_idx) - r0j128(2)
+          rvec128(3) = r_ell128(3, hit_idx) - r0j128(3)
+        else
+          denom128 = 0.0_r64
+          rvec128  = 0.0_r64
+          do k = 1, nquad
+            row128(k)  = w_bclag_local(k) / (t_up_local(i) - tgl_local(k))
+            denom128   = denom128   + row128(k)
+            rvec128(1) = rvec128(1) + (r_ell128(1,k) - r0j128(1)) * row128(k)
+            rvec128(2) = rvec128(2) + (r_ell128(2,k) - r0j128(2)) * row128(k)
+            rvec128(3) = rvec128(3) + (r_ell128(3,k) - r0j128(3)) * row128(k)
+          end do
+          row128  = row128  / denom128
+          rvec128 = rvec128 / denom128
+        end if
+        rdist128 = sqrt(rvec128(1)**2 + rvec128(2)**2 + rvec128(3)**2)
+
+        rinv128 = 1.0_r64 / rdist128
+        select case (power_int)
+        case (1_8)
+          val128 = rinv128
+        case (3_8)
+          val128 = rinv128**3
+        case (5_8)
+          val128 = rinv128**5
+        case default
+          val128 = 0.0_r64
+        end select
+        integrand0_up(i, 1) = real(val128, r64)
+      else
+      ! ----- Non-INVR (ASVESTAS / MOMENTS_MN / default): existing path -----
+      ! inlined bary_row_r64 fused with matmul(r_ell128,row128) and matmul(rp_ell128,row128)
+      hit_idx = 0_8
+      do k = 1, nquad
+        if (abs(t_up128(i) - tgl128(k)) <= eps_hit128 * max(1.0_r64, abs(tgl128(k)))) then
+          hit_idx = k
+          exit
+        end if
+      end do
+      if (hit_idx > 0_8) then
+        row128 = 0.0_r64
+        row128(hit_idx) = 1.0_r64
+        r_t128  = r_ell128(:,  hit_idx)
+        rp_t128 = rp_ell128(:, hit_idx)
+      else
+        denom128 = 0.0_r64
+        r_t128   = 0.0_r64
+        rp_t128  = 0.0_r64
+        do k = 1, nquad
+          row128(k)  = w_bclag128(k) / (t_up128(i) - tgl128(k))
+          denom128   = denom128   + row128(k)
+          r_t128(1)  = r_t128(1)  + r_ell128(1,k)  * row128(k)
+          r_t128(2)  = r_t128(2)  + r_ell128(2,k)  * row128(k)
+          r_t128(3)  = r_t128(3)  + r_ell128(3,k)  * row128(k)
+          rp_t128(1) = rp_t128(1) + rp_ell128(1,k) * row128(k)
+          rp_t128(2) = rp_t128(2) + rp_ell128(2,k) * row128(k)
+          rp_t128(3) = rp_t128(3) + rp_ell128(3,k) * row128(k)
+        end do
+        row128  = row128  / denom128
+        r_t128  = r_t128  / denom128
+        rp_t128 = rp_t128 / denom128
+      end if
+
+      ! Geometry shared by non-INVR kernels.
+      rvec128(1) = r_t128(1) - r0j128(1)
+      rvec128(2) = r_t128(2) - r0j128(2)
+      rvec128(3) = r_t128(3) - r0j128(3)
+      rdist128   = sqrt(rvec128(1)**2 + rvec128(2)**2 + rvec128(3)**2)
+
+      ! r64 kernel dispatch. See module-top comment for how to add a
+      ! new kernel here.
+      select case (kernel_id)
+      case (KERNEL_ASVESTAS)
+        ! val = -[tau_s . (qhat x rhat)] / [|r| * (1 - qhat.rhat)]
+        sp_t128  = sqrt(rp_t128(1)**2 + rp_t128(2)**2 + rp_t128(3)**2)
+        tau_t128 = rp_t128 / sp_t128
+        rhat128  = rvec128 / rdist128
+        qcrossrhat128(1) = qhat128(2)*rhat128(3) - qhat128(3)*rhat128(2)
+        qcrossrhat128(2) = qhat128(3)*rhat128(1) - qhat128(1)*rhat128(3)
+        qcrossrhat128(3) = qhat128(1)*rhat128(2) - qhat128(2)*rhat128(1)
+        qdotrhat128      = qhat128(1)*rhat128(1) + qhat128(2)*rhat128(2) + qhat128(3)*rhat128(3)
+        val128 = -(tau_t128(1)*qcrossrhat128(1) + tau_t128(2)*qcrossrhat128(2) + tau_t128(3)*qcrossrhat128(3)) &
+                 / (rdist128 * (1.0_r64 - qdotrhat128))
+        integrand0_up(i, 1) = real(val128, r64)
+      case (KERNEL_MOMENTS_MN)
+        ! Line-segment moments {N_0..N_order, M_0..M_order} packed
+        ! [N|M] in val128(1..ncol), with ncol = 2*(order+1).
+        ! Recurrence math: src/qotential_legacy_mod.f90 :: moments_r64.
+        block
+          integer(8) :: order_loc, kk
+          real(r64) :: val128(ncol)        ! shadows outer scalar val128
+          real(r64) :: rnorm128, rnorm_inv128, rnorm2_inv128
+          real(r64) :: r0dotr128, r0dotr_over_rnorm2_128
+          real(r64) :: r0norm2_over_rnorm2_128
+          real(r64) :: r0mr_inv128, r0mr_over_rnorm2_128
+          real(r64) :: r0normplusrnorm128
+          real(r64) :: r0dotr0mr_over_r0mr128, rdotr0mr_over_r0mr128
+          real(r64) :: denominator1_128, denominator2_128
+          real(r64) :: LMNcommon128, LMcommon128
+
+          order_loc = ncol/2_8 - 1_8
+
+          rnorm128       = sqrt(r_t128(1)**2 + r_t128(2)**2 + r_t128(3)**2)
+          rnorm_inv128   = 1.0_r64 / rnorm128
+          rnorm2_inv128  = rnorm_inv128 * rnorm_inv128
+          r0dotr128      = r0j128(1)*r_t128(1) + r0j128(2)*r_t128(2) &
+                         + r0j128(3)*r_t128(3)
+          r0dotr_over_rnorm2_128  = r0dotr128 * rnorm2_inv128
+          r0norm2_over_rnorm2_128 = (r0norm128 * r0norm128) * rnorm2_inv128
+          r0mr_inv128             = 1.0_r64 / rdist128            ! r0mr ≡ rdist128
+          r0mr_over_rnorm2_128    = rdist128 * rnorm2_inv128
+          r0normplusrnorm128      = r0norm128 + rnorm128
+
+          r0dotr0mr_over_r0mr128 = (r0j128(1)*(r0j128(1)-r_t128(1)) + &
+                                    r0j128(2)*(r0j128(2)-r_t128(2)) + &
+                                    r0j128(3)*(r0j128(3)-r_t128(3))) * r0mr_inv128
+          denominator1_128 = r0norm128 + r0dotr0mr_over_r0mr128
+          rdotr0mr_over_r0mr128 = (r_t128(1)*(r0j128(1)-r_t128(1)) + &
+                                   r_t128(2)*(r0j128(2)-r_t128(2)) + &
+                                   r_t128(3)*(r0j128(3)-r_t128(3))) * r0mr_inv128
+          denominator2_128 = rnorm128 + rdotr0mr_over_r0mr128
+          LMNcommon128 = r0normplusrnorm128 / (denominator1_128 + denominator2_128)
+
+          ! N0 -> val128(1)
+          val128(1) = log((r0normplusrnorm128 + rdist128) * LMNcommon128 * r0mr_inv128) &
+                      * rnorm_inv128
+          ! N1 -> val128(2) (only if order >= 1)
+          if (order_loc >= 1_8) then
+            val128(2) = val128(1) * r0dotr_over_rnorm2_128 &
+                      + (rdist128 - r0norm128) * rnorm2_inv128
+          end if
+          ! N recurrence k=2..order_loc -> val128(k+1)
+          do kk = 2_8, order_loc
+            val128(kk+1) = real(2_8*kk - 1_8, r64) / real(kk, r64)        &
+                             * r0dotr_over_rnorm2_128 * val128(kk)          &
+                         - real(kk - 1_8,    r64) / real(kk, r64)         &
+                             * r0norm2_over_rnorm2_128 * val128(kk-1)       &
+                         + 1.0_r64 / real(kk, r64) * r0mr_over_rnorm2_128
+          end do
+
+          ! M0 -> val128(order_loc+2)
+          LMcommon128 = 1.0_r64 / (r0norm128 * rnorm128 + r0dotr128)
+          val128(order_loc + 2_8) = LMNcommon128 * LMcommon128 *                            &
+              (((r0normplusrnorm128) * r0mr_inv128 + rnorm128 / r0norm128) * r0mr_inv128 &
+               - 1.0_r64 / r0norm128)
+          ! M1 -> val128(order_loc+3) (only if order >= 1)
+          if (order_loc >= 1_8) then
+            val128(order_loc + 3_8) = r0norm128 * val128(order_loc + 2_8) &
+                                      / (r0norm128 + rdist128)
+          end if
+          ! M recurrence k=2..order_loc -> val128(order_loc+2+k); reads N_{k-2} = val128(k-1)
+          do kk = 2_8, order_loc
+            val128(order_loc + 2_8 + kk) = (r0dotr128 * val128(order_loc + 1_8 + kk) +    &
+                                            real(kk - 1_8, r64) * val128(kk - 1_8) -    &
+                                            r0mr_inv128) * rnorm2_inv128
+          end do
+
+          integrand0_up(i, :) = real(val128, r64)
+        end block
+      case default
+        val128 = 0.0_r64
+        integrand0_up(i, 1) = real(val128, r64)
+      end select
+      end if
+
+      Br(:,i) = real(w_up128(i) * wgl_inv128 * row128, r64)
+    end do
+
+  end subroutine line_quad_BrF_r64
+
+  ! ----------------------------------------------------------------
+  ! line_quad_BrF_r128 — r128 sibling of line_quad_BrF_r64.
+  ! Verbatim port with kind/literal substitutions; no bind(C); kernel
+  ! argument is a procedure(kernel_iface_r128) dummy. Same INVR
+  ! local-coord shift, same ASVESTAS / MOMENTS_MN dispatch.
+  ! ----------------------------------------------------------------
+  subroutine line_quad_BrF_r128(nquad, n_up, ncol, &
+                                r_ell, rp_ell, &
+                                tgl, wgl, w_bclag, &
+                                t_up, w_up, &
+                                r0j, root_re, root_im, kdata, kernel_id, &
+                                Br, integrand0_up)
+    integer(8),  intent(in)  :: nquad, n_up, ncol
+    real(r128),  intent(in)  :: r_ell(3,nquad), rp_ell(3,nquad)
+    real(r128),  intent(in)  :: tgl(nquad), wgl(nquad), w_bclag(nquad)
+    real(r128),  intent(in)  :: t_up(n_up), w_up(n_up)
+    real(r128),  intent(in)  :: r0j(3), kdata(3)
+    real(r128),  intent(in)  :: root_re, root_im
+    integer(8),  intent(in)  :: kernel_id
+    real(r128),  intent(out) :: Br(nquad, n_up)
+    real(r128),  intent(out) :: integrand0_up(n_up, ncol)
 
     integer(8) :: i, k
     real(r128) :: r_t128(3), rp_t128(3), sp_t128, tau_t128(3)
@@ -931,20 +1248,33 @@ contains
     real(r128) :: tgl128(nquad), wgl128(nquad), wgl_inv128(nquad), w_bclag128(nquad)
     real(r128) :: r_ell128(3,nquad), rp_ell128(3,nquad)
     real(r128) :: t_up128(n_up), w_up128(n_up)
+    real(r128) :: tgl_local(nquad), t_up_local(n_up), w_bclag_local(nquad)
 
-    kdata128 = real(kdata, r128)
-    r0j128 = real(r0j, r128)
-    tgl128 = real(tgl, r128)
-    wgl128 = real(wgl, r128)
-    r_ell128 = real(r_ell, r128)
-    rp_ell128 = real(rp_ell, r128)
-    t_up128(1:n_up) = real(t_up(1:n_up), r128)
-    w_up128(1:n_up) = real(w_up(1:n_up), r128)
+    kdata128 = kdata
+    r0j128   = r0j
+    tgl128   = tgl
+    wgl128   = wgl
+    r_ell128 = r_ell
+    rp_ell128 = rp_ell
+    t_up128(1:n_up) = t_up(1:n_up)
+    w_up128(1:n_up) = w_up(1:n_up)
     wgl_inv128 = 1.0_r128 / wgl128
     call bclaginterpweights_r128(nquad, tgl128, w_bclag128)
     r0norm128 = sqrt(r0j128(1)**2 + r0j128(2)**2 + r0j128(3)**2)
 
-    ! Precompute kernel-specific loop-invariants outside the i loop.
+    ! INVR local-coordinate shift (mirrors r64 verbatim).
+    if (root_re >= 1.0_r128) then
+      tgl_local          = tgl128       - 1.0_r128
+      t_up_local(1:n_up) = t_up128(1:n_up) - 1.0_r128
+    else if (root_re <= -1.0_r128) then
+      tgl_local          = tgl128       + 1.0_r128
+      t_up_local(1:n_up) = t_up128(1:n_up) + 1.0_r128
+    else
+      tgl_local          = tgl128       - root_re
+      t_up_local(1:n_up) = t_up128(1:n_up) - root_re
+    end if
+    call bclaginterpweights_r128(nquad, tgl_local, w_bclag_local)
+
     power_int = 0_8
     qhat128   = 0.0_r128
     select case (kernel_id)
@@ -955,8 +1285,52 @@ contains
     end select
 
     eps_hit128 = 10.0_r128 * epsilon(1.0_r128)
+
     do i = 1, n_up
-      ! inlined bary_row_r128 fused with matmul(r_ell128,row128) and matmul(rp_ell128,row128)
+      if (kernel_id == KERNEL_INVR) then
+        ! ----- INVR: local-shifted bary, direct rvec accumulation -----
+        hit_idx = 0_8
+        do k = 1, nquad
+          if (abs(t_up_local(i) - tgl_local(k)) <= epsilon(1.0_r128)) then
+            hit_idx = k
+            exit
+          end if
+        end do
+        if (hit_idx > 0_8) then
+          row128 = 0.0_r128
+          row128(hit_idx) = 1.0_r128
+          rvec128(1) = r_ell128(1, hit_idx) - r0j128(1)
+          rvec128(2) = r_ell128(2, hit_idx) - r0j128(2)
+          rvec128(3) = r_ell128(3, hit_idx) - r0j128(3)
+        else
+          denom128 = 0.0_r128
+          rvec128  = 0.0_r128
+          do k = 1, nquad
+            row128(k)  = w_bclag_local(k) / (t_up_local(i) - tgl_local(k))
+            denom128   = denom128   + row128(k)
+            rvec128(1) = rvec128(1) + (r_ell128(1,k) - r0j128(1)) * row128(k)
+            rvec128(2) = rvec128(2) + (r_ell128(2,k) - r0j128(2)) * row128(k)
+            rvec128(3) = rvec128(3) + (r_ell128(3,k) - r0j128(3)) * row128(k)
+          end do
+          row128  = row128  / denom128
+          rvec128 = rvec128 / denom128
+        end if
+        rdist128 = sqrt(rvec128(1)**2 + rvec128(2)**2 + rvec128(3)**2)
+
+        rinv128 = 1.0_r128 / rdist128
+        select case (power_int)
+        case (1_8)
+          val128 = rinv128
+        case (3_8)
+          val128 = rinv128**3
+        case (5_8)
+          val128 = rinv128**5
+        case default
+          val128 = 0.0_r128
+        end select
+        integrand0_up(i, 1) = val128
+      else
+      ! ----- Non-INVR (ASVESTAS / MOMENTS_MN / default): existing path -----
       hit_idx = 0_8
       do k = 1, nquad
         if (abs(t_up128(i) - tgl128(k)) <= eps_hit128 * max(1.0_r128, abs(tgl128(k)))) then
@@ -988,30 +1362,13 @@ contains
         rp_t128 = rp_t128 / denom128
       end if
 
-      ! Geometry shared by every kernel.
       rvec128(1) = r_t128(1) - r0j128(1)
       rvec128(2) = r_t128(2) - r0j128(2)
       rvec128(3) = r_t128(3) - r0j128(3)
       rdist128   = sqrt(rvec128(1)**2 + rvec128(2)**2 + rvec128(3)**2)
 
-      ! r128 kernel dispatch. See module-top comment for how to add a
-      ! new kernel here.
       select case (kernel_id)
-      case (KERNEL_INVR)
-        rinv128 = 1.0_r128 / rdist128
-        select case (power_int)
-        case (1_8)
-          val128 = rinv128
-        case (3_8)
-          val128 = rinv128**3
-        case (5_8)
-          val128 = rinv128**5
-        case default
-          val128 = 0.0_r128
-        end select
-        integrand0_up(i, 1) = real(val128, r64)
       case (KERNEL_ASVESTAS)
-        ! val = -[tau_s . (qhat x rhat)] / [|r| * (1 - qhat.rhat)]
         sp_t128  = sqrt(rp_t128(1)**2 + rp_t128(2)**2 + rp_t128(3)**2)
         tau_t128 = rp_t128 / sp_t128
         rhat128  = rvec128 / rdist128
@@ -1021,14 +1378,11 @@ contains
         qdotrhat128      = qhat128(1)*rhat128(1) + qhat128(2)*rhat128(2) + qhat128(3)*rhat128(3)
         val128 = -(tau_t128(1)*qcrossrhat128(1) + tau_t128(2)*qcrossrhat128(2) + tau_t128(3)*qcrossrhat128(3)) &
                  / (rdist128 * (1.0_r128 - qdotrhat128))
-        integrand0_up(i, 1) = real(val128, r64)
+        integrand0_up(i, 1) = val128
       case (KERNEL_MOMENTS_MN)
-        ! Line-segment moments {N_0..N_order, M_0..M_order} packed
-        ! [N|M] in val128(1..ncol), with ncol = 2*(order+1).
-        ! Recurrence math: src/qotential_legacy_mod.f90 :: moments_r64.
         block
           integer(8) :: order_loc, kk
-          real(r128) :: val128(ncol)        ! shadows outer scalar val128
+          real(r128) :: val128(ncol)
           real(r128) :: rnorm128, rnorm_inv128, rnorm2_inv128
           real(r128) :: r0dotr128, r0dotr_over_rnorm2_128
           real(r128) :: r0norm2_over_rnorm2_128
@@ -1047,7 +1401,7 @@ contains
                          + r0j128(3)*r_t128(3)
           r0dotr_over_rnorm2_128  = r0dotr128 * rnorm2_inv128
           r0norm2_over_rnorm2_128 = (r0norm128 * r0norm128) * rnorm2_inv128
-          r0mr_inv128             = 1.0_r128 / rdist128            ! r0mr ≡ rdist128
+          r0mr_inv128             = 1.0_r128 / rdist128
           r0mr_over_rnorm2_128    = rdist128 * rnorm2_inv128
           r0normplusrnorm128      = r0norm128 + rnorm128
 
@@ -1061,15 +1415,12 @@ contains
           denominator2_128 = rnorm128 + rdotr0mr_over_r0mr128
           LMNcommon128 = r0normplusrnorm128 / (denominator1_128 + denominator2_128)
 
-          ! N0 -> val128(1)
           val128(1) = log((r0normplusrnorm128 + rdist128) * LMNcommon128 * r0mr_inv128) &
                       * rnorm_inv128
-          ! N1 -> val128(2) (only if order >= 1)
           if (order_loc >= 1_8) then
             val128(2) = val128(1) * r0dotr_over_rnorm2_128 &
                       + (rdist128 - r0norm128) * rnorm2_inv128
           end if
-          ! N recurrence k=2..order_loc -> val128(k+1)
           do kk = 2_8, order_loc
             val128(kk+1) = real(2_8*kk - 1_8, r128) / real(kk, r128)        &
                              * r0dotr_over_rnorm2_128 * val128(kk)          &
@@ -1078,42 +1429,64 @@ contains
                          + 1.0_r128 / real(kk, r128) * r0mr_over_rnorm2_128
           end do
 
-          ! M0 -> val128(order_loc+2)
           LMcommon128 = 1.0_r128 / (r0norm128 * rnorm128 + r0dotr128)
           val128(order_loc + 2_8) = LMNcommon128 * LMcommon128 *                            &
               (((r0normplusrnorm128) * r0mr_inv128 + rnorm128 / r0norm128) * r0mr_inv128 &
                - 1.0_r128 / r0norm128)
-          ! M1 -> val128(order_loc+3) (only if order >= 1)
           if (order_loc >= 1_8) then
             val128(order_loc + 3_8) = r0norm128 * val128(order_loc + 2_8) &
                                       / (r0norm128 + rdist128)
           end if
-          ! M recurrence k=2..order_loc -> val128(order_loc+2+k); reads N_{k-2} = val128(k-1)
           do kk = 2_8, order_loc
             val128(order_loc + 2_8 + kk) = (r0dotr128 * val128(order_loc + 1_8 + kk) +    &
                                             real(kk - 1_8, r128) * val128(kk - 1_8) -    &
                                             r0mr_inv128) * rnorm2_inv128
           end do
 
-          integrand0_up(i, :) = real(val128, r64)
+          integrand0_up(i, :) = val128
         end block
       case default
         val128 = 0.0_r128
-        integrand0_up(i, 1) = real(val128, r64)
+        integrand0_up(i, 1) = val128
       end select
+      end if
 
-      Br(:,i) = real(w_up128(i) * wgl_inv128 * row128, r64)
+      Br(:,i) = w_up128(i) * wgl_inv128 * row128
     end do
+  end subroutine line_quad_BrF_r128
 
-  end subroutine line_quad_BrF_r64
-
-  subroutine line_quad_compress_nearroot_r64(m, r0, nbd, sbdnp, nquad,  &
-                                     sxbd, sxpbd, stangbd, sspbd,       &
-                                     tgl, wgl, Dgl, w_bclag,            &
-                                     Legmat, bclagmatlr,                 &
-                                     fun, kdata, funvals, sxbdw,         &
-                                     root_re, root_im, root_ok, kernel_id)
-    integer(8),     intent(in)    :: m, nbd, sbdnp, nquad
+  ! ----------------------------------------------------------------
+  ! line_quad_compress_nearroot_r64
+  !
+  ! Fortran twin of utils/lqk_line_quad_compress_nearroot.m. For every
+  ! (panel ell, target j) pair: run the rootfinder to locate the
+  ! closest complex pre-image of r0 on the curve; if accepted, build
+  ! near-root upsampled compression weights via line_quad_BrF_r64 and
+  ! the column-loop weight formula; otherwise fall back to plain GL
+  ! weights (weights(:,ell,j,q) = wgl).
+  !
+  ! funvals (intent in): per-source-quad-node kernel values
+  !   (kernel * sp for scalar kernels, or pure moments for ncol > 1).
+  !   Used as divisor in the weight formula. Caller is expected to
+  !   pre-fill via line_kernel_eval_r64 / line_kernel_eval_vec_r64.
+  ! weights (intent inout): output compression weights.
+  ! root_re, root_im, root_ok (intent inout): rootfinder outputs.
+  !   Reset to zero at entry, then populated per (j, ell).
+  ! kernel_id: KERNEL_INVR / KERNEL_ASVESTAS / KERNEL_MOMENTS_MN; passed
+  !   through to line_quad_BrF_r64 for its inline r64 kernel dispatch.
+  !
+  ! NOTE: stangbd, sspbd, bclagmatlr appear in the signature for parity
+  ! with the .m wrapper (and downstream symmetry); they are not used
+  ! by the body. Same parity reason explains keeping fun in the list.
+  ! ----------------------------------------------------------------
+  subroutine line_quad_compress_nearroot_r64(m, r0, nbd, sbdnp, nquad, ncol,    &
+                                             sxbd, sxpbd, stangbd, sspbd,       &
+                                             tgl, wgl, Dgl, w_bclag,            &
+                                             Legmat, bclagmatlr,                &
+                                             fun, kdata, funvals, weights,      &
+                                             root_re, root_im, root_ok, kernel_id)
+    use lq_adaptive_mod, only: line_quad_root_initial_guess_r64, line_quad_root_refine_r64
+    integer(8),     intent(in)    :: m, nbd, sbdnp, nquad, ncol
     real(r64),      intent(in)    :: r0(3,m)
     real(r64),      intent(in)    :: sxbd(3,nbd), sxpbd(3,nbd), stangbd(3,nbd)
     real(r64),      intent(in)    :: sspbd(nbd)
@@ -1122,395 +1495,106 @@ contains
     real(r64),      intent(in)    :: Legmat(nquad,nquad), bclagmatlr(nquad,2)
     type(c_funptr), value         :: fun
     real(r64),      intent(in)    :: kdata(3,m)
-    real(r64),      intent(inout) :: funvals(nquad,sbdnp,m)
-    real(r64),      intent(inout) :: sxbdw(nquad,sbdnp,m)
-    real(r64),      intent(in)    :: root_re(m), root_im(m)
-    logical,        intent(in)    :: root_ok(m)
-    ! Optional: which inline r128 kernel formula line_quad_BrF_r64 uses
-    ! on the root_ok branch. Defaults to KERNEL_INVR (1/|r-r0|^p) so
-    ! existing call sites that build on the inverse-power kernel
-    ! (build_target_nearroot_weights_local_r64, the MEX wrappers, etc.)
-    ! keep their old behavior with no source change. The solid-angle
-    ! caller passes KERNEL_ASVESTAS.
-    integer(8),     intent(in), optional :: kernel_id
-    integer(8), parameter :: maxpan = 128_8, max_len_each_side = 12_8
-    real(r64),  parameter :: tol = 1.0e-14_r64
+    real(r64),      intent(in)    :: funvals(nquad,sbdnp,m,ncol)
+    real(r64),      intent(inout) :: weights(nquad,sbdnp,m,ncol)
+    real(r64),      intent(inout) :: root_re(m,sbdnp), root_im(m,sbdnp)
+    integer(8),     intent(inout) :: root_ok(m,sbdnp)
+    integer(8),     intent(in)    :: kernel_id
 
-    integer(8) :: ell, j, i, k, idx_start, idx_end, nquad2, n_up
-    integer(8) :: len, lenl, lenr
-    integer(8) :: k_id
-    integer :: c0, c1, rate
-    real(r64)  :: r_ell(3,nquad), rp_ell(3,nquad), sp_ell(nquad)
-    real(r64)  :: row(nquad), wgl_inv(nquad)
-    real(r64)  :: t_up(maxpan*nquad), w_up(maxpan*nquad), f_up(maxpan*nquad)
-    real(r64)  :: sp_up, Br(nquad,maxpan*nquad)
-    real(r64)  :: integrand0_up(maxpan*nquad,1), integrand0_compress(nquad)
-    real(r64), allocatable :: tgl2(:), wgl2(:), Dgl2(:,:)
-    procedure(kernel_iface_r64), pointer :: fptr
+    integer(8), parameter :: maxpan = 128_8
+    integer(8), parameter :: max_len_each_side = 12_8
 
-    if (present(kernel_id)) then
-      k_id = kernel_id
-    else
-      k_id = KERNEL_INVR
-    end if
+    real(r64)    :: rho
+    integer(8)   :: n_expa
+    real(r64)    :: r_ell(3,nquad), rp_ell(3,nquad), sp_ell(nquad)
+    real(r64)    :: xyz_hat(nquad,3)
+    real(r64)    :: t_up(maxpan*nquad), w_up(maxpan*nquad)
+    real(r64)    :: Br(nquad, maxpan*nquad)
+    real(r64)    :: integrand0_up(maxpan*nquad, ncol)
+    real(r64)    :: integrand0_compress(nquad)
+    integer(8)   :: ell, j, k, q, idx_start, idx_end
+    integer(8)   :: len, lenl, lenr, n_up
+    integer(8)   :: ifconv
+    complex(r64) :: tinit, troot, zz
+    real(r64)    :: bern
 
-    lq_profile_enabled_r64 = .false.  ! disable profiling for near-root code (too much overhead for small n_up)
-    if (.not.lq_profile_enabled_r64) then
+    ! root outputs reset on entry (mirrors lqk_line_quad_compress_nearroot.m)
+    root_re = 0.0_r64
+    root_im = 0.0_r64
+    root_ok = 0_8
 
-	    call c_f_procpointer(fun, fptr)
-	    nquad2 = max(1_8, nquad / 2_8)
-	    allocate(tgl2(nquad2), wgl2(nquad2), Dgl2(nquad2,nquad2))
-	    call gauss_r64(nquad2, tgl2, wgl2, Dgl2)
-
-	    wgl_inv = 1.0_r64 / wgl
+    n_expa = min(16_8, nquad)
+    rho    = 8.0_r64**(16.0_r64 / real(nquad, r64))
 
     do ell = 1, sbdnp
-      idx_start = (ell-1)*nquad + 1
+      idx_start = (ell-1_8)*nquad + 1_8
       idx_end   = ell*nquad
       r_ell     = sxbd(:, idx_start:idx_end)
       rp_ell(1,:) = matmul(Dgl, r_ell(1,:))
       rp_ell(2,:) = matmul(Dgl, r_ell(2,:))
       rp_ell(3,:) = matmul(Dgl, r_ell(3,:))
       do k = 1, nquad
-        sp_ell(k) = sqrt(sxpbd(1,idx_start+k-1)**2 + &
-                         sxpbd(2,idx_start+k-1)**2 + &
-                         sxpbd(3,idx_start+k-1)**2)
+        sp_ell(k) = sqrt(sxpbd(1,idx_start+k-1_8)**2 + &
+                         sxpbd(2,idx_start+k-1_8)**2 + &
+                         sxpbd(3,idx_start+k-1_8)**2)
       end do
+
+      xyz_hat(1:n_expa,1) = matmul(Legmat(1:n_expa,:), r_ell(1,:))
+      xyz_hat(1:n_expa,2) = matmul(Legmat(1:n_expa,:), r_ell(2,:))
+      xyz_hat(1:n_expa,3) = matmul(Legmat(1:n_expa,:), r_ell(3,:))
 
       do j = 1, m
-        if (root_ok(j)) then
+        ! initial complex root guess
+        tinit = cmplx(0.0_r64, 0.0_r64, kind=r64)
+        call line_quad_root_initial_guess_r64(tgl, r_ell(1,:), r_ell(2,:), r_ell(3,:), &
+                                              nquad, r0(1,j), r0(2,j), r0(3,j), tinit)
+        zz = cmplx(real(tinit, r64), aimag(tinit), kind=r64)
+        bern = abs(zz + sqrt(zz - 1.0_r64) * sqrt(zz + 1.0_r64))
 
-          call estimate_nearroot_lengths_r64(root_re(j), abs(root_im(j)), &
-                                              max_len_each_side, len, lenl, lenr)
-          n_up = nquad*(len - 1_8)
-          if (n_up > maxpan*nquad) error stop 'line_quad_compress_nearroot_r128: n_up exceeds work array, you are asking too much, man/woman'
-          call build_nearroot_nodes_r64(root_re(j), nquad, tgl, wgl, len, lenl, lenr, t_up(1:n_up), w_up(1:n_up))
-
-          ! r128-internal barycentric interpolation + r128 kernel eval.
-          ! BrF dispatches on k_id (KERNEL_INVR / KERNEL_ASVESTAS); the
-          ! caller's r64 callback `fptr` is intentionally bypassed here
-          ! because the cancellation-prone barycentric step is what we
-          ! want in r128, and the matching r128 kernel formula is
-          ! inlined inside BrF.
-          call line_quad_BrF_r64(nquad, n_up, 1_8, r_ell, rp_ell,    &
-                                 tgl, wgl, w_bclag,                  &
-                                 t_up(1:n_up), w_up(1:n_up),         &
-                                 r0(:,j), kdata(:,j), k_id,          &
-                                 Br(:,1:n_up), integrand0_up(1:n_up,1:1))
-          ! block
-          !   real(r128) :: r_t128(3), rp_t128(3), sp_t128
-          !   real(r128) :: dx128, dy128, dz128, r2_128, rinv128, val128
-          !   real(r128) :: eps_hit128, denom128
-          !   real(r128) :: row128(nquad)
-          !   integer(8) :: power_int, hit_idx
-          !   real(r128) :: tgl128(nquad), wgl128(nquad), wgl_inv128(nquad), w_bclag128(nquad)
-          !   ! real(r128) :: Dgl128(nquad,nquad)
-          !   real(r128) :: r0j128(3), kdata128(3)
-          !   real(r128) :: r_ell128(3,nquad), rp_ell128(3,nquad)
-          !   real(r128) :: t_up128(maxpan*nquad), w_up128(maxpan*nquad)
-
-          !   kdata128 = real(kdata(:,j), r128)
-          !   r0j128 = real(r0(:,j), r128)
-          !   tgl128 = real(tgl, r128)
-          !   wgl128 = real(wgl, r128)
-          !   ! Dgl128 = real(Dgl, r128)
-          !   r_ell128 = real(r_ell, r128)
-          !   rp_ell128 = real(sxpbd(:, idx_start:idx_end), r128)
-          !   t_up128(1:n_up) = real(t_up(1:n_up), r128)
-          !   w_up128(1:n_up) = real(w_up(1:n_up), r128)
-          !   wgl_inv128 = 1.0_r128 / wgl128
-
-          !   power_int = nint(real(kdata128(1), 8))
-          !   eps_hit128 = 10.0_r128 * epsilon(1.0_r128)
-          !   do i = 1, n_up
-          !     ! inlined bary_row_r128 fused with matmul(r_ell128,row128) and matmul(rp_ell128,row128)
-          !     hit_idx = 0_8
-          !     do k = 1, nquad
-          !       if (abs(t_up128(i) - tgl128(k)) <= eps_hit128 * max(1.0_r128, abs(tgl128(k)))) then
-          !         hit_idx = k
-          !         exit
-          !       end if
-          !     end do
-          !     if (hit_idx > 0_8) then
-          !       row128 = 0.0_r128
-          !       row128(hit_idx) = 1.0_r128
-          !       r_t128  = r_ell128(:,  hit_idx)
-          !       rp_t128 = rp_ell128(:, hit_idx)
-          !     else
-          !       denom128 = 0.0_r128
-          !       r_t128   = 0.0_r128
-          !       rp_t128  = 0.0_r128
-          !       do k = 1, nquad
-          !         row128(k)  = w_bclag128(k) / (t_up128(i) - tgl128(k))
-          !         denom128   = denom128   + row128(k)
-          !         r_t128(1)  = r_t128(1)  + r_ell128(1,k)  * row128(k)
-          !         r_t128(2)  = r_t128(2)  + r_ell128(2,k)  * row128(k)
-          !         r_t128(3)  = r_t128(3)  + r_ell128(3,k)  * row128(k)
-          !         rp_t128(1) = rp_t128(1) + rp_ell128(1,k) * row128(k)
-          !         rp_t128(2) = rp_t128(2) + rp_ell128(2,k) * row128(k)
-          !         rp_t128(3) = rp_t128(3) + rp_ell128(3,k) * row128(k)
-          !       end do
-          !       row128  = row128  / denom128
-          !       r_t128  = r_t128  / denom128
-          !       rp_t128 = rp_t128 / denom128
-          !     end if
-          !     ! sp_t128 = sqrt(rp_t128(1)**2 + rp_t128(2)**2 + rp_t128(3)**2)
-          !     dx128 = r_t128(1) - r0j128(1)
-          !     dy128 = r_t128(2) - r0j128(2)
-          !     dz128 = r_t128(3) - r0j128(3)
-          !     r2_128 = dx128*dx128 + dy128*dy128 + dz128*dz128
-          !     rinv128 = 1.0_r128 / sqrt(r2_128)
-          !     select case (power_int)
-          !     case (1)
-          !       val128 = rinv128
-          !     case (3)
-          !       val128 = rinv128**3
-          !     case (5)
-          !       val128 = rinv128**5
-          !     case default
-          !       val128 = 0.0_r128
-          !     end select
-          !     Br(:,i) = real(w_up128(i) * wgl_inv128 * row128, r64)
-          !     integrand0_up(i) = real(val128, r64)
-          !   end do
-          ! end block
-
-          do k = 1, nquad
-            integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up,1))
-            if (abs(funvals(k,ell,j)) > 0.0_r64) then
-              sxbdw(k,ell,j) = integrand0_compress(k) * sp_ell(k) / funvals(k,ell,j) * wgl(k)
-            else
-              sxbdw(k,ell,j) = wgl(k)
-            end if
-          end do
-          
-          ! ! mixed r128 implementation
-          ! block
-          !   real(r128) :: root_re128, root_im128
-          !   real(r128) :: tgl128(nquad), wgl128(nquad)
-          !   real(r128) :: t_up128(maxpan*nquad), w_up128(maxpan*nquad)
-
-          !   root_re128 = real(root_re(j), r128)
-          !   root_im128 = abs(real(root_im(j), r128))
-          !   tgl128 = real(tgl, r128)
-          !   wgl128 = real(wgl, r128)
-
-          !   call estimate_nearroot_lengths_r128(root_re128, root_im128, &
-          !                                       max_len_each_side, len, lenl, lenr)
-          !   n_up = nquad*(len - 1_8)
-          !   if (n_up > maxpan*nquad) error stop 'line_quad_compress_nearroot_r64: n_up exceeds work array'
-          !   call build_nearroot_nodes_r128(root_re128, nquad, tgl128, wgl128, len, lenl, lenr, &
-          !                                  t_up128(1:n_up), w_up128(1:n_up))
-          !   t_up(1:n_up) = real(t_up128(1:n_up), r64)
-          !   w_up(1:n_up) = real(w_up128(1:n_up), r64)
-          ! end block
-
-          
-          ! block
-          !   real(r128) :: t_up128(maxpan*nquad), r_ell128(3,nquad), rp_ell128(3,nquad)
-          !   real(r128) :: tgl128(nquad), w_bclag128(nquad), r0j128(3), kdata128(3)
-          !   real(r128) :: f_up128(maxpan*nquad)
-
-          !   t_up128(1:n_up) = real(t_up(1:n_up), r128)
-          !   r_ell128 = real(r_ell, r128)
-          !   rp_ell128 = real(rp_ell, r128)
-          !   tgl128 = real(tgl, r128)
-          !   w_bclag128 = real(w_bclag, r128)
-          !   r0j128 = real(r0(:,j), r128)
-          !   kdata128 = real(kdata(:,j), r128)
-
-          !   call eval_integrand_vec_r128(t_up128, n_up, r_ell128, rp_ell128, nquad, &
-          !                                tgl128, w_bclag128, invr_kernel_r128_local, r0j128, kdata128, &
-          !                                f_up128(1:n_up))
-          !   f_up(1:n_up) = real(f_up128(1:n_up), r64)
-          ! end block
-
-          ! block
-          !   real(r128) :: row128(nquad), rp_ell128(3,nquad)
-          !   real(r128) :: wgl128(nquad), wgl_inv128(nquad), w_bclag128(nquad)
-          !   real(r128) :: t_up128(maxpan*nquad), w_up128(maxpan*nquad), f_up128(maxpan*nquad)
-          !   real(r128) :: sp_ell128(nquad), funvals128(nquad)
-          !   real(r128) :: Br128(nquad,maxpan*nquad), integrand0_up128(maxpan*nquad)
-          !   real(r128) :: integrand0_compress128(nquad), sp_up128
-
-          !   rp_ell128 = real(rp_ell, r128)
-          !   wgl128 = real(wgl, r128)
-          !   wgl_inv128 = real(wgl_inv, r128)
-          !   w_bclag128 = real(w_bclag, r128)
-          !   t_up128(1:n_up) = real(t_up(1:n_up), r128)
-          !   w_up128(1:n_up) = real(w_up(1:n_up), r128)
-          !   f_up128(1:n_up) = real(f_up(1:n_up), r128)
-          !   sp_ell128 = real(sp_ell, r128)
-          !   funvals128 = real(funvals(:,ell,j), r128)
-
-          !   do i = 1, n_up
-          !     call bary_row_r128(nquad, real(tgl, r128), w_bclag128, t_up128(i), row128)
-          !     sp_up128 = sqrt(sum((matmul(rp_ell128, row128))**2))
-          !     integrand0_up128(i) = f_up128(i) / sp_up128
-          !     Br128(:,i) = w_up128(i) * wgl_inv128 * row128
-          !   end do
-
-          !   do k = 1, nquad
-          !     integrand0_compress128(k) = sum(Br128(k,1:n_up) * integrand0_up128(1:n_up))
-          !     sxbdw(k,ell,j) = real(integrand0_compress128(k) * sp_ell128(k) / funvals128(k) * wgl128(k), r64)
-          !   end do
-          ! end block
-
-          ! ! pure r64 implementation
-          ! call estimate_nearroot_lengths_r64(root_re(j), abs(root_im(j)), &
-          !                                   max_len_each_side, len, lenl, lenr)
-          ! n_up = nquad*(len - 1_8)
-          ! if (n_up > maxpan*nquad) error stop 'line_quad_compress_nearroot_r64: n_up exceeds work array'
-          ! call build_nearroot_nodes_r64(root_re(j), nquad, tgl, wgl, len, lenl, lenr, &
-          !                               t_up(1:n_up), w_up(1:n_up))
-          
-          ! call eval_integrand_vec_r64(t_up, n_up, r_ell, rp_ell, nquad, &
-          !                             tgl, w_bclag, fptr, r0(:,j), kdata(:,j), &
-          !                             f_up(1:n_up))
-          
-          ! do i = 1, n_up
-          !   call bary_row_r64(nquad, tgl, w_bclag, t_up(i), row)
-          !   sp_up = sqrt(sum((matmul(rp_ell, row))**2))
-          !   integrand0_up(i) = f_up(i) / sp_up
-          !   Br(:,i) = w_up(i) * wgl_inv * row
-          ! end do
-          
-          ! do k = 1, nquad
-          !   integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up))
-          !   sxbdw(k,ell,j) = integrand0_compress(k) * sp_ell(k) / funvals(k,ell,j) * wgl(k)
-          ! end do
-
-        else
-          call run_bisect_panel_r64(r_ell, rp_ell, nquad, tgl, wgl, w_bclag, &
-                                    nquad2, tgl2, wgl2, fptr, r0(:,j), kdata(:,j), &
-                                    tol, maxpan, t_up, w_up, f_up, n_up)
-
-          do i = 1, n_up
-            call bary_row_r64(nquad, tgl, w_bclag, t_up(i), row)
-            sp_up = sqrt(sum((matmul(rp_ell, row))**2))
-            integrand0_up(i,1) = f_up(i) / sp_up
-            Br(:,i) = w_up(i) * wgl_inv * row
-          end do
-
-          do k = 1, nquad
-            integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up,1))
-            if (abs(funvals(k,ell,j)) > 0.0_r64) then
-              sxbdw(k,ell,j) = integrand0_compress(k) * sp_ell(k) / funvals(k,ell,j) * wgl(k)
-            else
-              sxbdw(k,ell,j) = wgl(k)
-            end if
-          end do
-        end if
-      end do
-    end do
-    deallocate(tgl2, wgl2, Dgl2)
-    end if
-
-    if (lq_profile_enabled_r64) then
-    call c_f_procpointer(fun, fptr)
-    call system_clock(c0, rate)
-
-    wgl_inv = 1.0_r64 / wgl
-    call system_clock(c1)
-    lq_profile_compress_calls_r64 = lq_profile_compress_calls_r64 + 1_8
-    lq_profile_setup_sec_r64 = lq_profile_setup_sec_r64 + &
-      real(c1 - c0, r64)/real(rate, r64)
-
-    do ell = 1, sbdnp
-      call system_clock(c0)
-      idx_start = (ell-1)*nquad + 1
-      idx_end   = ell*nquad
-      r_ell     = sxbd(:, idx_start:idx_end)
-      rp_ell(1,:) = matmul(Dgl, r_ell(1,:))
-      rp_ell(2,:) = matmul(Dgl, r_ell(2,:))
-      rp_ell(3,:) = matmul(Dgl, r_ell(3,:))
-      do k = 1, nquad
-        sp_ell(k) = sqrt(sxpbd(1,idx_start+k-1)**2 + &
-                         sxpbd(2,idx_start+k-1)**2 + &
-                         sxpbd(3,idx_start+k-1)**2)
-      end do
-      call system_clock(c1)
-      lq_profile_geom_sec_r64 = lq_profile_geom_sec_r64 + &
-        real(c1 - c0, r64)/real(rate, r64)
-      
-      do j = 1, m
-        if (root_ok(j)) then
-          call system_clock(c0)
-          block
-            real(r128) :: root_re128, root_im128
-            real(r128) :: tgl128(nquad), wgl128(nquad)
-            real(r128) :: t_up128(maxpan*nquad), w_up128(maxpan*nquad)
-
-            root_re128 = real(root_re(j), r128)
-            root_im128 = abs(real(root_im(j), r128))
-            tgl128 = real(tgl, r128)
-            wgl128 = real(wgl, r128)
-
-            call estimate_nearroot_lengths_r128(root_re128, root_im128, &
-                                                max_len_each_side, len, lenl, lenr)
-            n_up = nquad*(len - 1_8)
-            if (n_up > maxpan*nquad) error stop 'line_quad_compress_nearroot_r64: n_up exceeds work array'
-            call build_nearroot_nodes_r128(root_re128, nquad, tgl128, wgl128, len, lenl, lenr, &
-                                           t_up128(1:n_up), w_up128(1:n_up))
-            t_up(1:n_up) = real(t_up128(1:n_up), r64)
-            w_up(1:n_up) = real(w_up128(1:n_up), r64)
-          end block
-          ! call estimate_nearroot_lengths_r64(root_re(j), abs(root_im(j)), &
-          !                                    max_len_each_side, len, lenl, lenr)
-          ! n_up = nquad*(len - 1_8)
-          ! if (n_up > maxpan*nquad) error stop 'line_quad_compress_nearroot_r64: n_up exceeds work array'
-          ! call build_nearroot_nodes_r64(root_re(j), nquad, tgl, wgl, len, lenl, lenr, &
-          !                               t_up(1:n_up), w_up(1:n_up))
-          call eval_integrand_vec_r64(t_up, n_up, r_ell, rp_ell, nquad, &
-                                      tgl, w_bclag, fptr, r0(:,j), kdata(:,j), &
-                                      f_up(1:n_up))
-          ! call eval_integrand_vec_r64(t_up, n_up, r_ell, rp_ell, nquad, &
-          !                             tgl, w_bclag, fptr, r0(:,j), kdata(:,j), &
-          !                             f_up(1:n_up))
-          call system_clock(c1)
-          lq_profile_compress_targets_r64 = lq_profile_compress_targets_r64 + 1_8
-          lq_profile_total_nup_r64 = lq_profile_total_nup_r64 + n_up
-          lq_profile_max_nup_r64 = max(lq_profile_max_nup_r64, n_up)
-          lq_profile_bisect_sec_r64 = lq_profile_bisect_sec_r64 + &
-            real(c1 - c0, r64)/real(rate, r64)
-        else
-          sxbdw(:,ell,j) = wgl
-          cycle
-        end if
-
-        call system_clock(c0)
-        do i = 1, n_up
-          call bary_row_r64(nquad, tgl, w_bclag, t_up(i), row)
-          sp_up = sqrt(sum((matmul(rp_ell, row))**2))
-          integrand0_up(i,1) = f_up(i) / sp_up
-          Br(:,i) = w_up(i) * wgl_inv * row
-        end do
-        call system_clock(c1)
-        lq_profile_br_sec_r64 = lq_profile_br_sec_r64 + &
-          real(c1 - c0, r64)/real(rate, r64)
-        
-        call system_clock(c0)
-        do k = 1, nquad
-          integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up,1))
-        end do
-        call system_clock(c1)
-        lq_profile_compress_sec_r64 = lq_profile_compress_sec_r64 + &
-            real(c1 - c0, r64)/real(rate, r64)
-        
-        call system_clock(c0)
-        do k = 1, nquad
-          if (abs(funvals(k,ell,j)) > 0.0_r64) then
-            sxbdw(k,ell,j) = integrand0_compress(k) * sp_ell(k) / funvals(k,ell,j) * wgl(k)
-          else
-            sxbdw(k,ell,j) = wgl(k)
+        ! Bernstein gate -> refine -> acceptance
+        if (bern < 1.75_r64 * rho) then
+          troot  = cmplx(0.0_r64, 0.0_r64, kind=r64)
+          ifconv = 0_8
+          call line_quad_root_refine_r64(xyz_hat(1:n_expa,1), xyz_hat(1:n_expa,2), xyz_hat(1:n_expa,3), &
+                                         n_expa, r0(1,j), r0(2,j), r0(3,j), &
+                                         tinit, troot, ifconv)
+          zz = cmplx(real(troot, r64), aimag(troot), kind=r64)
+          bern = abs(zz + sqrt(zz - 1.0_r64) * sqrt(zz + 1.0_r64))
+          if (ifconv == 1_8 .and. bern < rho) then
+            root_re(j,ell) = real(troot, r64)
+            root_im(j,ell) = aimag(troot)
+            root_ok(j,ell) = 1_8
           end if
-        end do
-        call system_clock(c1)
-          lq_profile_weight_sec_r64 = lq_profile_weight_sec_r64 + &
-            real(c1 - c0, r64)/real(rate, r64)
+        end if
+
+        if (root_ok(j,ell) /= 0_8) then
+          call estimate_nearroot_lengths_r64(root_re(j,ell), abs(root_im(j,ell)), &
+                                             max_len_each_side, len, lenl, lenr)
+          n_up = nquad*(len - 1_8)
+          if (n_up > maxpan*nquad) error stop 'line_quad_compress_nearroot_r64: n_up exceeds work array'
+          call build_nearroot_nodes_r64(root_re(j,ell), nquad, tgl, wgl, len, lenl, lenr, &
+                                        t_up(1:n_up), w_up(1:n_up))
+
+          call line_quad_BrF_r64(nquad, n_up, ncol, r_ell, rp_ell,             &
+                                 tgl, wgl, w_bclag,                            &
+                                 t_up(1:n_up), w_up(1:n_up),                   &
+                                 r0(:,j), root_re(j,ell), root_im(j,ell),      &
+                                 kdata(:,j), kernel_id,                        &
+                                 Br(:, 1:n_up), integrand0_up(1:n_up, 1:ncol))
+          do q = 1, ncol
+            integrand0_compress = matmul(Br(:, 1:n_up), integrand0_up(1:n_up, q))
+            do k = 1, nquad
+              weights(k,ell,j,q) = integrand0_compress(k) * sp_ell(k) / funvals(k,ell,j,q) * wgl(k)
+            end do
+          end do
+        else
+          do q = 1, ncol
+            weights(:,ell,j,q) = wgl
+          end do
+        end if
       end do
     end do
-    end if 
+
   end subroutine line_quad_compress_nearroot_r64
 
 
@@ -1729,7 +1813,7 @@ contains
     end function bernstein_radius
   end subroutine build_target_nearroot_weights_local_r64
 
-  subroutine build_target_nearroot_weights_r64(nquad, tgl, wgl, legmat, &
+  subroutine build_target_nearroot_weights_r64(nquad, ncol, tgl, wgl, legmat, &
                                                xj, yj, zj, spj, stauj, &
                                                xjhat, yjhat, zjhat, &
                                                rho, xtk, ytk, ztk, &
@@ -1739,7 +1823,7 @@ contains
                                                kernel_id, dgl_in, w_bclag_in, sxpbd_in, n_expa_in, adaptive_fallback)
     use lq_adaptive_mod, only: line_quad_root_initial_guess_r64, line_quad_root_refine_r64
     implicit none
-    integer(8), intent(in) :: nquad
+    integer(8), intent(in) :: nquad, ncol
     real(r64), intent(in) :: tgl(nquad), wgl(nquad), legmat(nquad,nquad)
     real(r64), intent(in) :: xj(nquad), yj(nquad), zj(nquad), spj(nquad)
     real(r64), intent(in) :: stauj(3,nquad)
@@ -1754,10 +1838,10 @@ contains
     real(r64), intent(in) :: rho, xtk, ytk, ztk
     type(c_funptr), value :: fun
     real(r64), intent(in) :: kdata(3)
-    real(r64), intent(inout) :: funvals0(nquad), weights(nquad)
+    real(r64), intent(inout) :: funvals0(nquad,ncol), weights(nquad,ncol)
     complex(r64), intent(inout) :: troot
     logical, intent(inout) :: accepted
-    real(r64), intent(inout) :: I_local
+    real(r64), intent(inout) :: I_local(ncol)
     integer(8), intent(in), optional :: kernel_id
     real(r64), intent(in), optional :: dgl_in(nquad,nquad), w_bclag_in(nquad)
     real(r64), intent(in), optional :: sxpbd_in(3,nquad)
@@ -1774,12 +1858,20 @@ contains
     real(r64) :: sxbd(3,nquad), sxpbd(3,nquad), stangbd(3,nquad), sspbd(nquad)
     real(r64) :: dgl(nquad,nquad), w_bclag(nquad), bclagmatlr(nquad,2)
     real(r64) :: tgl_work(nquad), wgl_work(nquad)
-    real(r64) :: r0(3,1), kdata1(3,1), funvals1(nquad,1,1), sxbdw1(nquad,1,1)
-    real(r64) :: root_re(1), root_im(1)
-    logical :: root_ok(1)
+    integer(8), parameter :: maxpan = 128_8, max_len_each_side = 12_8
+    real(r64) :: r0(3,1), kdata1(3,1)
+    real(r64) :: funvals1(nquad,1,1,1), sxbdw1(nquad,1,1,1)
+    real(r64) :: funvals_vec(nquad,1,ncol,1)
+    real(r64) :: rp_ell(3,nquad)
+    real(r64) :: t_up(maxpan*nquad), w_up(maxpan*nquad)
+    real(r64) :: Br(nquad,maxpan*nquad), f_up(maxpan*nquad,ncol)
+    real(r64) :: integrand0_compress(nquad)
+    real(r64) :: root_re(1,1), root_im(1,1)
+    integer(8) :: root_ok(1,1)
     complex(r64) :: tinit, zz
     real(r64) :: br_init, br_root
-    integer(8) :: converged, k, k_id, n_expa
+    integer(8) :: converged, k, q, k_id, n_expa
+    integer(8) :: len, lenl, lenr, n_up
     logical :: use_adaptive_fallback
 
     if (present(kernel_id)) then
@@ -1850,32 +1942,81 @@ contains
     kdata1(:,1) = kdata
     funvals1 = 0.0_r64
     sxbdw1 = 0.0_r64
-    call line_kernel_eval_r64(1_8, r0, nquad, 1_8, nquad, &
-                              sxbd, sxpbd, stangbd, fun, kdata1, funvals1)
-    if (.not. accepted .and. .not. use_adaptive_fallback) then
-      funvals0 = funvals1(:,1,1)
-      weights = wgl
-      do k = 1, nquad
-        I_local = I_local + funvals0(k)*weights(k)
+
+    if (k_id == KERNEL_MOMENTS_MN) then
+      funvals_vec = 0.0_r64
+      call line_kernel_eval_vec_r64(1_8, r0, nquad, 1_8, nquad, ncol, &
+                                    sxbd, sxpbd, stangbd, fun, kdata1, funvals_vec)
+      do q = 1, ncol
+        funvals0(:,q) = funvals_vec(:,1,q,1)
+      end do
+
+      if (.not. accepted) then
+        do q = 1, ncol
+          weights(:,q) = wgl*spj
+          I_local(q) = sum(funvals0(:,q)*weights(:,q))
+        end do
+        return
+      end if
+
+      call estimate_nearroot_lengths_r64(real(troot, r64), abs(aimag(troot)), &
+                                         max_len_each_side, len, lenl, lenr)
+      n_up = nquad*(len - 1_8)
+      if (n_up > maxpan*nquad) error stop 'build_target_nearroot_weights_r64: n_up exceeds work array'
+      call build_nearroot_nodes_r64(real(troot, r64), nquad, tgl, wgl, len, lenl, lenr, &
+                                    t_up(1:n_up), w_up(1:n_up))
+      rp_ell(1,:) = matmul(dgl, xj)
+      rp_ell(2,:) = matmul(dgl, yj)
+      rp_ell(3,:) = matmul(dgl, zj)
+      call line_quad_BrF_r64(nquad, n_up, ncol, sxbd, rp_ell, &
+                             tgl, wgl, w_bclag, t_up(1:n_up), w_up(1:n_up), &
+                             r0(:,1), real(troot, r64), aimag(troot), kdata, k_id, &
+                             Br(:,1:n_up), f_up(1:n_up,1:ncol))
+
+      do q = 1, ncol
+        integrand0_compress = matmul(Br(:,1:n_up), f_up(1:n_up,q))
+        do k = 1, nquad
+          weights(k,q) = integrand0_compress(k) * spj(k) / funvals0(k,q) * wgl(k)
+        end do
+        I_local(q) = sum(funvals0(:,q)*weights(:,q))
       end do
       return
     end if
 
-    root_re(1) = real(troot, r64)
-    root_im(1) = aimag(troot)
-    root_ok(1) = accepted
-    call line_quad_compress_nearroot_r64(1_8, r0, nquad, 1_8, nquad, &
-                                         sxbd, sxpbd, stangbd, sspbd, &
-                                         tgl, wgl, dgl, w_bclag, &
-                                         legmat, bclagmatlr, &
-                                         fun, kdata1, funvals1, sxbdw1, &
-                                         root_re, root_im, root_ok, &
-                                         kernel_id=k_id)
+    call line_kernel_eval_r64(1_8, r0, nquad, 1_8, nquad, &
+                              sxbd, sxpbd, stangbd, fun, kdata1, funvals1(:,:,:,1))
 
-    funvals0 = funvals1(:,1,1)
-    weights = sxbdw1(:,1,1)
+    ! Three flat dispatch cases on the scalar path:
+    !   1. plain-GL fallback   (root rejected, adaptive_fallback off)
+    !   2. bary-Lagrange       (root accepted -> line_quad_compress_nearroot_r64)
+    !   3. adaptive bisection  (root rejected, adaptive_fallback on -> line_quad_compress_r64)
+    if (.not. accepted .and. .not. use_adaptive_fallback) then
+      funvals0(:,1) = funvals1(:,1,1,1)
+      weights(:,1)  = wgl
+    else if (accepted) then
+      root_re(1,1) = real(troot, r64)
+      root_im(1,1) = aimag(troot)
+      root_ok(1,1) = 1_8
+      call line_quad_compress_nearroot_r64(1_8, r0, nquad, 1_8, nquad, 1_8, &
+                                           sxbd, sxpbd, stangbd, sspbd, &
+                                           tgl, wgl, dgl, w_bclag, &
+                                           legmat, bclagmatlr, &
+                                           fun, kdata1, funvals1, sxbdw1, &
+                                           root_re, root_im, root_ok, k_id)
+      funvals0(:,1) = funvals1(:,1,1,1)
+      weights(:,1)  = sxbdw1(:,1,1,1)
+    else
+      call line_quad_compress_r64(1_8, r0, nquad, 1_8, nquad, &
+                                  sxbd, sxpbd, stangbd, sspbd, &
+                                  tgl, wgl, dgl, w_bclag, &
+                                  legmat, bclagmatlr, &
+                                  fun, kdata1, funvals1(:,:,:,1), sxbdw1(:,:,:,1))
+      funvals0(:,1) = funvals1(:,1,1,1)
+      weights(:,1)  = sxbdw1(:,1,1,1)
+    end if
+
     do k = 1, nquad
-      I_local = I_local + funvals0(k)*weights(k)
+      I_local(1) = I_local(1) + funvals0(k,1)*weights(k,1)
     end do
   end subroutine build_target_nearroot_weights_r64
 
@@ -1904,9 +2045,10 @@ contains
     real(r128), intent(inout) :: I_local
     real(r128) :: sxbd(3,nquad), sxpbd(3,nquad), stangbd(3,nquad), sspbd(nquad)
     real(r128) :: bclagmatlr(nquad,2)
-    real(r128) :: r0(3,1), kdata1(3,1), funvals1(nquad,1,1), sxbdw1(nquad,1,1)
-    real(r128) :: root_re(1), root_im(1)
-    logical :: root_ok(1)
+    real(r128) :: r0(3,1), kdata1(3,1)
+    real(r128) :: funvals1(nquad,1,1,1), sxbdw1(nquad,1,1,1)
+    real(r128) :: root_re(1,1), root_im(1,1)
+    integer(8) :: root_ok(1,1)
     complex(r128) :: tinit, zz
     real(r128) :: br_init, br_root
     integer(8) :: converged, k
@@ -1942,20 +2084,20 @@ contains
     funvals1 = 0.0_r128
     sxbdw1 = 0.0_r128
     call line_kernel_eval_r128(1_8, r0, nquad, 1_8, nquad, &
-                               sxbd, sxpbd, stangbd, fun, kdata1, funvals1)
+                               sxbd, sxpbd, stangbd, fun, kdata1, funvals1(:,:,:,1))
 
-    funvals0 = funvals1(:,1,1)
+    funvals0 = funvals1(:,1,1,1)
     if (accepted) then
-      root_re(1) = real(troot, r128)
-      root_im(1) = aimag(troot)
-      root_ok(1) = .true.
-      call line_quad_compress_nearroot_r128(1_8, r0, nquad, 1_8, nquad, &
+      root_re(1,1) = real(troot, r128)
+      root_im(1,1) = aimag(troot)
+      root_ok(1,1) = 1_8
+      call line_quad_compress_nearroot_r128(1_8, r0, nquad, 1_8, nquad, 1_8, &
                                             sxbd, sxpbd, stangbd, sspbd, &
                                             tgl, wgl, dgl, w_bclag, &
                                             legmat, bclagmatlr, &
                                             fun, kdata1, funvals1, sxbdw1, &
-                                            root_re, root_im, root_ok)
-      weights = sxbdw1(:,1,1)
+                                            root_re, root_im, root_ok, KERNEL_INVR)
+      weights = sxbdw1(:,1,1,1)
     else
       weights = wgl
     end if
@@ -2045,12 +2187,31 @@ contains
     integer(8), intent(in)  :: max_len_each_side
     integer(8), intent(out) :: len, lenl, lenr
 
+    ! factor matches build_nearroot_panel_ends_r128's panel-shrink ratio (3.0)
+    ! so the level estimate is consistent with the actual panel layout.
     real(r128), parameter :: factor = 3.0_r128
     real(r128) :: dist, target_width
     integer(8) :: levels
 
-    dist = max(root_imag_abs, 1.0e-12_r128)
-    target_width = min(2.0_r128, max(2.0_r128*dist, 1.0e-6_r128))
+    ! Distance from the complex root to the real panel [-1,1].
+    !
+    ! Interior root projection:
+    !   closest real point is t_root, so distance is |Im root|.
+    !
+    ! Exterior root projection:
+    !   closest real point is the nearest endpoint, so include real offset.
+
+    if (t_root >= 1.0_r128) then
+      dist = sqrt((t_root - 1.0_r128)**2 + root_imag_abs**2)
+    else if (t_root <= -1.0_r128) then
+      dist = sqrt((t_root + 1.0_r128)**2 + root_imag_abs**2)
+    else
+      dist = root_imag_abs
+    end if
+
+    dist = max(dist, tiny(1.0_r128))
+    target_width = min(2.0_r128, 2.0_r128*dist)
+
     levels = ceiling(log(2.0_r128/target_width)/log(factor)) + 1_8
     levels = max(1_8, min(levels, max_len_each_side))
 
@@ -2352,13 +2513,25 @@ contains
   ! ----------------------------------------------------------------
   ! line_quad_compress_nearroot_r128
   ! ----------------------------------------------------------------
-  subroutine line_quad_compress_nearroot_r128(m, r0, nbd, sbdnp, nquad,  &
-                                       sxbd, sxpbd, stangbd, sspbd,      &
-                                       tgl, wgl, Dgl, w_bclag,           &
-                                       Legmat, bclagmatlr,               &
-                                       fun, kdata, funvals, sxbdw,        &
-                                       root_re, root_im, root_ok)
-    integer(8),  intent(in)    :: m, nbd, sbdnp, nquad
+  ! ----------------------------------------------------------------
+  ! line_quad_compress_nearroot_r128
+  !
+  ! r128 sibling of line_quad_compress_nearroot_r64 — verbatim port
+  ! with kind/literal substitutions; no bind(C); kernel argument is
+  ! a procedure(kernel_iface_r128) dummy. Same internal rootfinding,
+  ! ncol-aware 4D shapes, and bary-Lagrange near-root weight formula
+  ! as the r64 sibling. Calls line_quad_BrF_r128 instead of _r64.
+  !
+  ! See line_quad_compress_nearroot_r64 docblock for behavioural details.
+  ! ----------------------------------------------------------------
+  subroutine line_quad_compress_nearroot_r128(m, r0, nbd, sbdnp, nquad, ncol,    &
+                                              sxbd, sxpbd, stangbd, sspbd,       &
+                                              tgl, wgl, Dgl, w_bclag,            &
+                                              Legmat, bclagmatlr,                &
+                                              fun, kdata, funvals, weights,      &
+                                              root_re, root_im, root_ok, kernel_id)
+    use lq_adaptive_mod, only: line_quad_root_initial_guess_r128, line_quad_root_refine_r128
+    integer(8),  intent(in)    :: m, nbd, sbdnp, nquad, ncol
     real(r128),  intent(in)    :: r0(3,m)
     real(r128),  intent(in)    :: sxbd(3,nbd), sxpbd(3,nbd), stangbd(3,nbd)
     real(r128),  intent(in)    :: sspbd(nbd)
@@ -2367,81 +2540,148 @@ contains
     real(r128),  intent(in)    :: Legmat(nquad,nquad), bclagmatlr(nquad,2)
     procedure(kernel_iface_r128) :: fun
     real(r128),  intent(in)    :: kdata(3,m)
-    real(r128),  intent(inout) :: funvals(nquad,sbdnp,m)
-    real(r128),  intent(inout) :: sxbdw(nquad,sbdnp,m)
-    real(r128),  intent(in)    :: root_re(m), root_im(m)
-    logical,     intent(in)    :: root_ok(m)
+    real(r128),  intent(in)    :: funvals(nquad,sbdnp,m,ncol)
+    real(r128),  intent(inout) :: weights(nquad,sbdnp,m,ncol)
+    real(r128),  intent(inout) :: root_re(m,sbdnp), root_im(m,sbdnp)
+    integer(8),  intent(inout) :: root_ok(m,sbdnp)
+    integer(8),  intent(in)    :: kernel_id
 
-    integer(8), parameter :: maxpan = 128_8, max_len_each_side = 12_8
-    real(r128), parameter :: tol    = 1.0e-30_r128
+    integer(8), parameter :: maxpan = 128_8
+    integer(8), parameter :: max_len_each_side = 24_8
+    real(r128), parameter :: tol               = 1.0e-30_r128
 
-    integer(8) :: ell, j, i, k, idx_start, idx_end, nquad2, n_up
-    integer(8) :: len, lenl, lenr
-    real(r128) :: r_ell(3,nquad), rp_ell(3,nquad), sp_ell(nquad)
-    real(r128) :: row(nquad), wgl_inv(nquad)
-    real(r128) :: t_up(maxpan*nquad), w_up(maxpan*nquad), f_up(maxpan*nquad)
-    real(r128) :: sp_up, Br(nquad,maxpan*nquad)
-    real(r128) :: integrand0_up(maxpan*nquad), integrand0_compress(nquad)
+    real(r128)    :: rho
+    integer(8)    :: n_expa
+    real(r128)    :: r_ell(3,nquad), rp_ell(3,nquad), sp_ell(nquad)
+    real(r128)    :: xyz_hat(nquad,3)
+    real(r128)    :: t_up(maxpan*nquad), w_up(maxpan*nquad)
+    real(r128)    :: Br(nquad, maxpan*nquad)
+    real(r128)    :: integrand0_up(maxpan*nquad, ncol)
+    real(r128)    :: integrand0_compress(nquad)
+    integer(8)    :: ell, j, k, q, idx_start, idx_end, i
+    integer(8)    :: len, lenl, lenr, n_up
+    integer(8)    :: ifconv
+    complex(16)   :: tinit, troot, zz
+    real(r128)    :: bern
+
+    ! adaptive-bisection fallback scratch (used in the else branch where
+    ! the rootfinder rejects; mirrors line_quad_compress_r128's body).
+    integer(8)              :: nquad2
     real(r128), allocatable :: tgl2(:), wgl2(:), Dgl2(:,:)
+    real(r128)              :: wgl_inv(nquad)
+    real(r128)              :: row(nquad)
+    real(r128)              :: f_up(maxpan*nquad)
+    real(r128)              :: integrand0_up_ad(maxpan*nquad)
+    real(r128)              :: sp_up
 
+    ! root outputs reset on entry (mirrors lqk_line_quad_compress_nearroot.m)
+    root_re = 0.0_r128
+    root_im = 0.0_r128
+    root_ok = 0_8
+
+    n_expa = min(16_8, nquad)
+    ! heuristic for nearroot acceptance radius (~2 * r64 rho); validated
+    ! against adaptive bisection in test/solid_angle/debug_solid_angle_r128.f90
+    ! at r128 noise-floor agreement across the in-range epsilon sweep.
+    rho    = 2.0_r128 * (4.0_r128**(16.0_r128 / real(nquad, r128)))
+
+    ! one-time bisection-fallback setup (used in the else branch below)
     nquad2 = max(1_8, nquad / 2_8)
     allocate(tgl2(nquad2), wgl2(nquad2), Dgl2(nquad2,nquad2))
     call gauss_r128(nquad2, tgl2, wgl2, Dgl2)
-
     wgl_inv = 1.0_r128 / wgl
 
     do ell = 1, sbdnp
-      idx_start = (ell-1)*nquad + 1
+      idx_start = (ell-1_8)*nquad + 1_8
       idx_end   = ell*nquad
       r_ell     = sxbd(:, idx_start:idx_end)
       rp_ell(1,:) = matmul(Dgl, r_ell(1,:))
       rp_ell(2,:) = matmul(Dgl, r_ell(2,:))
       rp_ell(3,:) = matmul(Dgl, r_ell(3,:))
       do k = 1, nquad
-        sp_ell(k) = sqrt(sxpbd(1,idx_start+k-1)**2 + &
-                         sxpbd(2,idx_start+k-1)**2 + &
-                         sxpbd(3,idx_start+k-1)**2)
+        sp_ell(k) = sqrt(sxpbd(1,idx_start+k-1_8)**2 + &
+                         sxpbd(2,idx_start+k-1_8)**2 + &
+                         sxpbd(3,idx_start+k-1_8)**2)
       end do
 
+      xyz_hat(1:n_expa,1) = matmul(Legmat(1:n_expa,:), r_ell(1,:))
+      xyz_hat(1:n_expa,2) = matmul(Legmat(1:n_expa,:), r_ell(2,:))
+      xyz_hat(1:n_expa,3) = matmul(Legmat(1:n_expa,:), r_ell(3,:))
+
       do j = 1, m
-        if (root_ok(j)) then
-          call estimate_nearroot_lengths_r128(root_re(j), abs(root_im(j)), &
+        ! initial complex root guess
+        tinit = cmplx(0.0_r128, 0.0_r128, kind=r128)
+        call line_quad_root_initial_guess_r128(tgl, r_ell(1,:), r_ell(2,:), r_ell(3,:), &
+                                               nquad, r0(1,j), r0(2,j), r0(3,j), tinit)
+        zz = cmplx(real(tinit, r128), aimag(tinit), kind=r128)
+        bern = abs(zz + sqrt(zz - 1.0_r128) * sqrt(zz + 1.0_r128))
+
+        ! Bernstein gate -> refine -> acceptance
+        if (bern < 1.75_r128 * rho) then
+          troot  = cmplx(0.0_r128, 0.0_r128, kind=r128)
+          ifconv = 0_8
+          call line_quad_root_refine_r128(xyz_hat(1:n_expa,1), xyz_hat(1:n_expa,2), xyz_hat(1:n_expa,3), &
+                                          n_expa, r0(1,j), r0(2,j), r0(3,j), &
+                                          tinit, troot, ifconv)
+          zz = cmplx(real(troot, r128), aimag(troot), kind=r128)
+          bern = abs(zz + sqrt(zz - 1.0_r128) * sqrt(zz + 1.0_r128))
+          if (ifconv == 1_8 .and. bern < rho) then
+            root_re(j,ell) = real(troot, r128)
+            root_im(j,ell) = aimag(troot)
+            root_ok(j,ell) = 1_8
+          end if
+        end if
+
+        if (root_ok(j,ell) /= 0_8) then
+          call estimate_nearroot_lengths_r128(root_re(j,ell), abs(root_im(j,ell)), &
                                               max_len_each_side, len, lenl, lenr)
           n_up = nquad*(len - 1_8)
           if (n_up > maxpan*nquad) error stop 'line_quad_compress_nearroot_r128: n_up exceeds work array'
-          call build_nearroot_nodes_r128(root_re(j), nquad, tgl, wgl, len, lenl, lenr, &
+          call build_nearroot_nodes_r128(root_re(j,ell), nquad, tgl, wgl, len, lenl, lenr, &
                                          t_up(1:n_up), w_up(1:n_up))
-          call eval_integrand_vec_r128(t_up, n_up, r_ell, rp_ell, nquad, &
-                                       tgl, w_bclag, fun, r0(:,j), kdata(:,j), &
-                                       f_up(1:n_up))
+
+          call line_quad_BrF_r128(nquad, n_up, ncol, r_ell, rp_ell,             &
+                                  tgl, wgl, w_bclag,                            &
+                                  t_up(1:n_up), w_up(1:n_up),                   &
+                                  r0(:,j), root_re(j,ell), root_im(j,ell),      &
+                                  kdata(:,j), kernel_id,                        &
+                                  Br(:, 1:n_up), integrand0_up(1:n_up, 1:ncol))
+
+          do q = 1, ncol
+            integrand0_compress = matmul(Br(:, 1:n_up), integrand0_up(1:n_up, q))
+            do k = 1, nquad
+              weights(k,ell,j,q) = integrand0_compress(k) * sp_ell(k) / funvals(k,ell,j,q) * wgl(k)
+            end do
+          end do
         else
+          ! Rootfinder rejected the panel/target: fall back to adaptive
+          ! bisection (mirrors line_quad_compress_r128's body) instead of
+          ! the previous plain-GL (wgl) fallback. Validated against the
+          ! in-range epsilon sweep in test/solid_angle/debug_solid_angle_r128.f90.
           call run_bisect_panel_r128(r_ell, rp_ell, nquad, tgl, wgl, w_bclag, &
                                      nquad2, tgl2, wgl2, fun, r0(:,j), kdata(:,j), &
                                      tol, maxpan, t_up, w_up, f_up, n_up)
+          do i = 1_8, n_up
+            call bary_row_r128(nquad, tgl, w_bclag, t_up(i), row)
+            sp_up = sqrt(sum((matmul(rp_ell, row))**2))
+            integrand0_up_ad(i) = f_up(i) / sp_up
+            Br(:,i) = w_up(i) * wgl_inv * row
+          end do
+          do k = 1_8, nquad
+            integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up_ad(1:n_up))
+          end do
+          do q = 1_8, ncol
+            do k = 1_8, nquad
+              weights(k,ell,j,q) = integrand0_compress(k) * sp_ell(k) &
+                                    / funvals(k,ell,j,q) * wgl(k)
+            end do
+          end do
         end if
-
-        do i = 1, n_up
-          call bary_row_r128(nquad, tgl, w_bclag, t_up(i), row)
-          sp_up = sqrt(sum((matmul(rp_ell, row))**2))
-          integrand0_up(i) = f_up(i) / sp_up
-          Br(:,i) = w_up(i) * wgl_inv * row
-        end do
-
-        do k = 1, nquad
-          integrand0_compress(k) = sum(Br(k,1:n_up) * integrand0_up(1:n_up))
-        end do
-
-        do k = 1, nquad
-          if (abs(funvals(k,ell,j)) > 0.0_r128) then
-            sxbdw(k,ell,j) = integrand0_compress(k) * sp_ell(k) / funvals(k,ell,j) * wgl(k)
-          else
-            sxbdw(k,ell,j) = wgl(k)
-          end if
-        end do
       end do
     end do
 
     deallocate(tgl2, wgl2, Dgl2)
+
   end subroutine line_quad_compress_nearroot_r128
 
 end module lq_kernel_mod

@@ -66,52 +66,59 @@ make clean
 ## Reference Results
 The following reference outputs were recorded on local runs.
 
-### Extended precision (`./build/test_solid_angle_r128`)
-Parameters: `order=14`, `nq=12`, `nvr=432`, `ntri=768`, `ratio=1.0`
+### Extended precision, nearroot (`./build/test_solid_angle_r128 nearroot`)
+Parameters: `order=16`, `nq=16`, `nvr=768`, `ntri=768`, `ratio=1.0`
 
 ```text
 === test_solid_angle_r128 (quad precision) ===
-order=14  nq=12  nvr=432  ntri=768  ratio= 1.0
-Mesh built in    2.32 s
+order=16  nq=16  nvr=768  ntri=768  ratio= 1.0
+use_nearroot = T
+Mesh built in    4.31 s
 
 --- Part A: solid angle sum ---
-far exterior  (1.5,0,0): |omega_sum| =   7.080390E-31
-near exterior (1.1,0,0): |omega_sum| =   9.781399E-31
+far exterior  (1.5,0,0): |omega_sum| =   2.789740E-32
+near exterior (1.001,0,0): |omega_sum| =   1.224617E-31
+near exterior (1.000001,0,0): |omega_sum| =   4.902802E-30
+near exterior (1.000000001,0,0): |omega_sum| =   3.646596E-27
 
 --- Part B: DLP accuracy (direct sum + near correction) ---
-N_src = 331776
+N_src = 589824
 ntarget = 834 exterior points
 Direct DLP sum ...
-  done in   23.57 s
+  done in   50.28 s
 Near-field correction ...
-  done in   33.85 s
+  done in   16.45 s
 
 --- Result: DLP(1) = 0 outside ---
-max |u|  =   2.751315E-28
-rms |u|  =   4.642503E-29
+max |u|  =   2.173480E-32
+rms |u|  =   3.423790E-33
+argmax: i=630  tx=  5.555555555555555E-02  2.000000000000000E+00  6.944444444444444E-01
+u(imax)        =  -2.173480294783766E-32
+K_corr(imax)   =  -4.615084860876367E-33
 ```
 
-### Double precision (`./build/test_solid_angle`)
+### Double precision, nearroot (`./build/test_solid_angle nearroot`)
 Parameters: `order=14`, `mp=np=8`, `ntri=768`, `ratio=1.0`
 
 ```text
 === test_solid_angle ===
 order=14  mp=np=8  ntri=768  ratio= 1.0
-Mesh built in    0.02 s
+use_nearroot = T
+Mesh built in    0.01 s
 
 --- Part A: solid angle sum ---
-far exterior  (1.5,0,0): |omega_sum| =  4.846E-14
-near exterior (1.1,0,0): |omega_sum| =  1.312E-14
+far exterior  (1.5,0,0): |omega_sum| =  8.428E-14
+near exterior (1.1,0,0): |omega_sum| =  2.639E-13
 
 --- Part B: DLP accuracy (direct sum + near correction) ---
 N_src = 80640
 ntarget = 6598 exterior points
 Direct DLP sum ...
-  done in    0.13 s
+  done in    0.17 s
 Near-field correction ...
-  done in    0.02 s
+  done in    0.01 s
 
 --- Result: DLP(1) = 0 outside ---
-max |u|  =  3.508E-14
-rms |u|  =  1.267E-15
+max |u|  =  3.419E-14
+rms |u|  =  1.260E-15
 ```

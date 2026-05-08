@@ -22,3 +22,4 @@ mex_id_ = 'lqk_compress_nearroot_r128_mex(c i int64_t[x], c i double[xx], c i in
 [funvals, sxbdw] = LineQuaaadrature_mex(mex_id_, m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr, fptr_int, kdata, funvals, sxbdw, root_re, root_im, root_ok, 1, 3, m, 1, 1, 1, 3, nbd, 3, nbd, 3, nbd, nbd, nquad, nquad, nquad, nquad, nquad, nquad, nquad, nquad, 2, 1, 3, m, nqs, m, nqs, m, m, m, m);
 end
 
+

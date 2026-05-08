@@ -17,7 +17,8 @@ module koorn_geom_mod
   integer, parameter :: r128 = 16
   private
   public :: koorn_vals2coefs_coefs2vals, line3quadr_3dline, &
-            circumcircle_transform_3d, circumcircle_transform_3d_r128
+            circumcircle_transform_3d, circumcircle_transform_3d_r128, &
+            lqkg_setup_target_r128
 
 contains
 
@@ -396,5 +397,105 @@ contains
     R(1,:) = e1;  R(2,:) = e2;  R(3,:) = e3
 
   end subroutine circumcircle_transform_3d_r128
+
+  ! ----------------------------------------------------------------
+  ! lqkg_setup_target_r128
+  ! Bundles the per-triangle r128 setup that the orchestration
+  ! lqs_evaluate_solid_angle_integral_r128 used to do in MATLAB:
+  !   1. sxbd = sxbd_in;
+  !      per panel ell: stangbd, sspbd from Dgl * sxbd_in / |Dgl * sxbd_in|.
+  !   2. circumcircle_transform_3d_r128(r_vert, R, c, alpha).
+  !   3. txnew  = alpha * R * (tx  - c)
+  !      snxnew =          R * snx
+  !      sxbd   = alpha * R * (sxbd - c)
+  !      stangbd =          R * stangbd
+  !   4. qhat = mean(snxnew(:,j) over j) / |...|
+  !   5. per panel ell: sxpbd = Dgl * sxbd.
+  !   6. kdata(:,j) = qhat for j = 1..m   (Asvestas convention).
+  ! All compute is r128; outputs are exposed for HDF5 write at the mex layer.
+  ! ----------------------------------------------------------------
+  subroutine lqkg_setup_target_r128(m, n, nbd, sbdnp, nquad,                  &
+                                    r_vert, tx, snx, sxbd_in, Dgl,            &
+                                    R, c, alpha,                              &
+                                    sxbd, sxpbd, stangbd, sspbd,              &
+                                    txnew, snxnew, qhat, kdata)
+    integer(8), intent(in)    :: m, n, nbd, sbdnp, nquad
+    real(r128), intent(in)    :: r_vert(3,3)
+    real(r128), intent(in)    :: tx(3,m), snx(3,n)
+    real(r128), intent(in)    :: sxbd_in(3,nbd)
+    real(r128), intent(in)    :: Dgl(nquad,nquad)
+    real(r128), intent(out)   :: R(3,3), c(3), alpha
+    real(r128), intent(out)   :: sxbd(3,nbd), sxpbd(3,nbd)
+    real(r128), intent(out)   :: stangbd(3,nbd), sspbd(nbd)
+    real(r128), intent(out)   :: txnew(3,m), snxnew(3,n)
+    real(r128), intent(out)   :: qhat(3), kdata(3,m)
+
+    integer(8) :: ell, k, q, j, idx_start, idx_end, idx
+    real(r128) :: sxp(3), qnrm
+
+    ! 1. stangbd, sspbd from Dgl * sxbd_in (per panel)
+    sxbd = sxbd_in
+    do ell = 1_8, sbdnp
+      idx_start = (ell - 1_8)*nquad + 1_8
+      idx_end   = ell*nquad
+      do k = 1_8, nquad
+        sxp(1) = 0.0_r128;  sxp(2) = 0.0_r128;  sxp(3) = 0.0_r128
+        do q = 1_8, nquad
+          idx = idx_start + q - 1_8
+          sxp(1) = sxp(1) + Dgl(k,q) * sxbd(1, idx)
+          sxp(2) = sxp(2) + Dgl(k,q) * sxbd(2, idx)
+          sxp(3) = sxp(3) + Dgl(k,q) * sxbd(3, idx)
+        end do
+        idx = idx_start + k - 1_8
+        sspbd(idx)        = sqrt(sxp(1)**2 + sxp(2)**2 + sxp(3)**2)
+        stangbd(:, idx)   = sxp / sspbd(idx)
+      end do
+    end do
+
+    ! 2. circumcircle transform
+    call circumcircle_transform_3d_r128(r_vert, R, c, alpha)
+
+    ! 3. apply transform
+    do j = 1_8, m
+      txnew(:,j) = alpha * matmul(R, tx(:,j) - c)
+    end do
+    do j = 1_8, n
+      snxnew(:,j) = matmul(R, snx(:,j))
+    end do
+    do k = 1_8, nbd
+      sxbd(:,k)    = alpha * matmul(R, sxbd(:,k) - c)
+      stangbd(:,k) = matmul(R, stangbd(:,k))
+    end do
+
+    ! 4. qhat = mean(snxnew, 2) / norm
+    qhat = 0.0_r128
+    do j = 1_8, n
+      qhat = qhat + snxnew(:,j)
+    end do
+    qhat = qhat / real(n, r128)
+    qnrm = sqrt(qhat(1)**2 + qhat(2)**2 + qhat(3)**2)
+    qhat = qhat / qnrm
+
+    ! 5. sxpbd = Dgl * sxbd per panel
+    sxpbd = 0.0_r128
+    do ell = 1_8, sbdnp
+      idx_start = (ell - 1_8)*nquad + 1_8
+      idx_end   = ell*nquad
+      do k = 1_8, nquad
+        do q = 1_8, nquad
+          idx = idx_start + q - 1_8
+          sxpbd(1, idx_start + k - 1_8) = sxpbd(1, idx_start + k - 1_8) + Dgl(k,q) * sxbd(1, idx)
+          sxpbd(2, idx_start + k - 1_8) = sxpbd(2, idx_start + k - 1_8) + Dgl(k,q) * sxbd(2, idx)
+          sxpbd(3, idx_start + k - 1_8) = sxpbd(3, idx_start + k - 1_8) + Dgl(k,q) * sxbd(3, idx)
+        end do
+      end do
+    end do
+
+    ! 6. kdata = qhat for all j (Asvestas)
+    do j = 1_8, m
+      kdata(:,j) = qhat
+    end do
+
+  end subroutine lqkg_setup_target_r128
 
 end module koorn_geom_mod

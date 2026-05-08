@@ -11,3 +11,5 @@ build/
 
 # MATLAB MEX binaries
 *.mex*
+
+*.bak*

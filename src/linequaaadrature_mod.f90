@@ -164,6 +164,37 @@ contains
   end subroutine bclaginterpweights_r128
 
   ! ------------------------------------------------------------------
+  ! bclagmatlr_r128
+  ! Barycentric-Lagrange interpolation matrix evaluated at the
+  ! endpoints xi = -1 (column 1) and xi = +1 (column 2). Mirrors the
+  ! MATLAB-side build in lqs_evaluate_solid_angle_integral_r128.m.
+  ! ------------------------------------------------------------------
+  subroutine bclagmatlr_r128(n, tgl, w_bclag, bclagmatlr)
+    integer(8), intent(in)    :: n
+    real(r128), intent(in)    :: tgl(n), w_bclag(n)
+    real(r128), intent(inout) :: bclagmatlr(n, 2)
+
+    integer(8) :: k
+    real(r128) :: tgll, tglr, denoml, denomr, templ, tempr
+
+    tgll = -1.0_r128
+    tglr =  1.0_r128
+    denoml = 0.0_r128
+    denomr = 0.0_r128
+    do k = 1_8, n
+      templ = w_bclag(k) / (tgll - tgl(k))
+      tempr = w_bclag(k) / (tglr - tgl(k))
+      bclagmatlr(k, 1) = templ
+      bclagmatlr(k, 2) = tempr
+      denoml = denoml + templ
+      denomr = denomr + tempr
+    end do
+    bclagmatlr(:, 1) = bclagmatlr(:, 1) / denoml
+    bclagmatlr(:, 2) = bclagmatlr(:, 2) / denomr
+
+  end subroutine bclagmatlr_r128
+
+  ! ------------------------------------------------------------------
   ! legeexps
   ! GL nodes tgl, weights wgl, and Legendre expansion matrices.
   !   itype=0 : nodes only

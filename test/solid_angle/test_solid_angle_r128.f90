@@ -18,12 +18,12 @@ program test_solid_angle_r128
   implicit none
 
   ! ---- problem parameters ----
-  integer(8), parameter :: order      = 14_8
+  integer(8), parameter :: order      = 16_8
   integer(8), parameter :: mp         = 8_8
   integer(8), parameter :: np         = 8_8
   real(r128), parameter :: ratio      = 1.0_r128    ! unit sphere
   integer(8), parameter :: nquad_bdry = order + 16_8
-  integer(8), parameter :: nq         = 12_8        ! areal rule: nvr = 3*nq^2
+  integer(8), parameter :: nq         = 16_8        ! areal rule: nvr = 3*nq^2
   integer(8), parameter :: nvr        = 3_8*nq*nq
   integer(8), parameter :: ntri       = 12_8*mp*np
   integer(8), parameter :: nplotpts   = 10_8
@@ -54,7 +54,7 @@ program test_solid_angle_r128
   real(r128)               :: delta_k
 
   ! ---- Part A sanity check ----
-  real(r128) :: tx2(3,2), omega_sum(2), ialpha2(2)
+  real(r128) :: tx2(3,4), omega_sum(4), ialpha2(4)
 
   ! ---- misc ----
   real(r128) :: domain(6), px, py, pz, qpoint(3), qradii
@@ -110,12 +110,14 @@ program test_solid_angle_r128
   write(*,'(/,A)') '--- Part A: solid angle sum ---'
 
   tx2(:,1) = [1.5_r128, 0.0_r128, 0.0_r128]   ! exterior, far
-  tx2(:,2) = [1.1_r128, 0.0_r128, 0.0_r128]   ! exterior, near surface
+  tx2(:,2) = [1.001_r128, 0.0_r128, 0.0_r128]   ! exterior, near surface
+  tx2(:,3) = [1.000001_r128, 0.0_r128, 0.0_r128]
+  tx2(:,4) = [1.000000001_r128, 0.0_r128, 0.0_r128] 
 
   omega_sum = 0.0_r128
   do k = 1_8, ntri
     ialpha2 = 0.0_r128
-    call evaluate_solid_angle_integral_r128(2_8, tx2, nvr,               &
+    call evaluate_solid_angle_integral_r128(4_8, tx2, nvr,               &
         x(:,:,k), nx_s(:,:,k), w(:,k),                                   &
         tri_vert(:,:,k), 3_8*nquad_bdry, xbd(:,:,k), use_nearroot, ialpha2)
     omega_sum = omega_sum + ialpha2
@@ -123,8 +125,12 @@ program test_solid_angle_r128
 
   write(*,'(A,ES14.6)') 'far exterior  (1.5,0,0): |omega_sum| = ', &
       real(abs(omega_sum(1)), 8)
-  write(*,'(A,ES14.6)') 'near exterior (1.1,0,0): |omega_sum| = ', &
+  write(*,'(A,ES14.6)') 'near exterior (1.001,0,0): |omega_sum| = ', &
       real(abs(omega_sum(2)), 8)
+  write(*,'(A,ES14.6)') 'near exterior (1.000001,0,0): |omega_sum| = ', &
+      real(abs(omega_sum(3)), 8)
+  write(*,'(A,ES14.6)') 'near exterior (1.000000001,0,0): |omega_sum| = ', &
+      real(abs(omega_sum(4)), 8)
 
   ! ==============================================================
   ! Part B: full DLP accuracy
@@ -177,7 +183,7 @@ program test_solid_angle_r128
   !$omp   private(ntc, near_idx, tcj, IalphaAsv, Kmat, qpoint, qradii, i, delta_k)
   do k = 1_8, ntri
     qpoint = sum(x(:,:,k), dim=2) / real(nvr, r128)
-    qradii = 12.0_r128 * sqrt(sum(w(:,k)))
+    qradii = 7.0_r128 * sqrt(sum(w(:,k)))
 
     allocate(near_idx(ntarget))
     ntc = 0_8
@@ -231,6 +237,16 @@ program test_solid_angle_r128
   write(*,'(/,A)')      '--- Result: DLP(1) = 0 outside ---'
   write(*,'(A,ES14.6)') 'max |u|  = ', real(err_max, 8)
   write(*,'(A,ES14.6)') 'rms |u|  = ', real(err_l2, 8)
+
+  block
+    integer(8) :: imax_arr(1), imax
+    imax_arr = maxloc(abs(u(1:ntarget)))
+    imax = imax_arr(1)
+    write(*,'(A,I0,A,3ES23.15)') 'argmax: i=', imax, &
+        '  tx=', real(tx(1,imax), 8), real(tx(2,imax), 8), real(tx(3,imax), 8)
+    write(*,'(A,ES23.15)') 'u(imax)        = ', real(u(imax), 8)
+    write(*,'(A,ES23.15)') 'K_corr(imax)   = ', real(K_corr(imax), 8)
+  end block
 
   ! Cleanup
   deallocate(x, nx_s, w, xbd, tri_vert, tri2face, tri2cell, ptr)

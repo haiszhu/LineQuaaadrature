@@ -76,7 +76,7 @@ program test_solid_angle
   integer :: nargs
 
   ! ==============================================================
-  use_nearroot = .false.
+  use_nearroot = .true.
 
   nargs = command_argument_count()
   if (nargs >= 1) then
