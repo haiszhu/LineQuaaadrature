@@ -409,52 +409,6 @@ end
 # FORTRAN line_quad_compress_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,nquad] Legmat, double[nquad,2] bclagmatlr, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals, inout double[nqs,m] sxbdw);
 end
 
-@function [funvals, sxbdw] = lqk_compress_nearroot_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr, fptr_int, kdata, funvals, sxbdw, root_re, root_im, root_ok)
-m        = double(m);
-nbd      = double(nbd);
-sbdnp    = double(sbdnp);
-nquad    = double(nquad);
-fptr_int = double(fptr_int);
-nqs      = nquad * sbdnp;
-if nargin < 18 || isempty(funvals)
-  funvals = zeros(nqs, m);
-else
-  funvals = reshape(funvals, nqs, m);
-end
-if nargin < 19 || isempty(sxbdw)
-  sxbdw = zeros(nqs, m);
-else
-  sxbdw = reshape(sxbdw, nqs, m);
-end
-root_re = double(root_re(:));
-root_im = double(root_im(:));
-root_ok = double(root_ok(:));
-# FORTRAN lqk_compress_nearroot_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,nquad] Legmat, double[nquad,2] bclagmatlr, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals, inout double[nqs,m] sxbdw, double[m] root_re, double[m] root_im, int[m] root_ok);
-end
-
-@function [funvals, sxbdw] = lqk_compress_nearroot_r128_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, tgl, wgl, Dgl, w_bclag, Legmat, bclagmatlr, fptr_int, kdata, funvals, sxbdw, root_re, root_im, root_ok)
-m        = double(m);
-nbd      = double(nbd);
-sbdnp    = double(sbdnp);
-nquad    = double(nquad);
-fptr_int = double(fptr_int);
-nqs      = nquad * sbdnp;
-if nargin < 18 || isempty(funvals)
-  funvals = zeros(nqs, m);
-else
-  funvals = reshape(funvals, nqs, m);
-end
-if nargin < 19 || isempty(sxbdw)
-  sxbdw = zeros(nqs, m);
-else
-  sxbdw = reshape(sxbdw, nqs, m);
-end
-root_re = double(root_re(:));
-root_im = double(root_im(:));
-root_ok = double(root_ok(:));
-# FORTRAN lqk_compress_nearroot_r128_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] sxpbd, double[3,nbd] stangbd, double[nbd] sspbd, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,nquad] Legmat, double[nquad,2] bclagmatlr, int[1] fptr_int, double[3,m] kdata, inout double[nqs,m] funvals, inout double[nqs,m] sxbdw, double[m] root_re, double[m] root_im, int[m] root_ok);
-end
-
 
 @function [q_lq64] = lqe_line_integral_r128_mex(m, r0, nbd, sbdnp, nquad, sxbd, sxpbd, stangbd, sspbd, fptr_int, kdata, q_lq64)
 m        = double(m);
