@@ -1,4 +1,4 @@
-# LineQuaaadrature
+# LineQuaaadrature (outdated)
 
 Line-quadrature reference code (Fortran + MATLAB MEX on Mac).
 
@@ -9,7 +9,7 @@ This code was written by Codex and Claude Code as a testbed to reproduce parts o
 - John S. Asvestas, *Line integrals and physical optics. Part I. The transformation of the solid-angle surface integral to a line integral*, Journal of the Optical Society of America A, 2(6): 891-895 (1985).  
   https://doi.org/10.1364/JOSAA.2.000891
 
-The main purpose is to provide extended-precision solid-angle integral tests, to debug whether machine-precision singular / near-singular quadrature is achievable.
+One purpose is to provide extended-precision solid-angle integral tests, to debug whether machine-precision singular / near-singular quadrature is achievable.
 
 ## Layout
 - `src/` Fortran source modules
@@ -122,3 +122,6 @@ Near-field correction ...
 max |u|  =  3.419E-14
 rms |u|  =  1.260E-15
 ```
+## To do list
+
+* solid angle non-adaptive
