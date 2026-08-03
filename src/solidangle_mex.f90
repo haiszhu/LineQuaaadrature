@@ -41,6 +41,18 @@ end subroutine lqe_line_integral_r128_mex
 ! Output funvals_pre(nbd, ncol, m) stores M moments only.
 ! Here ncol = 2*(order+1), matching qotential's momentsalladapt:
 ! compute full [N_0..N_{2*order+1} | M_0..M_{2*order+1}], return M.
+subroutine lqs_evaluate_solid_angle_integral_fast_mex(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+  use solidangle_mod, only: evaluate_solid_angle_integral_fast_driver_r64
+  implicit none
+  integer(8), intent(in)    :: m, n, nbd
+  real(8),    intent(in)    :: tx(3,m), sx(3,n), snx(3,n), sw(n)
+  real(8),    intent(in)    :: r_vert(3,3), sxbd_in(3,nbd)
+  real(8),    intent(inout) :: IalphaAsvestas(m)
+
+  call evaluate_solid_angle_integral_fast_driver_r64(m, tx, n, sx, snx, sw, r_vert, &
+                                                     nbd, sxbd_in, IalphaAsvestas)
+end subroutine lqs_evaluate_solid_angle_integral_fast_mex
+
 ! ------------------------------------------------------------------
 subroutine lqs_eval_moments_funvals_mex(m, tx, nbd, sxbd, nquad, order, ncol, &
                                         funvals_pre)

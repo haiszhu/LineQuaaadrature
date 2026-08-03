@@ -87,11 +87,13 @@ LQ_SOURCES := $(SRC_DIR)/linequaaadrature_mod.f90 \
 	              $(SRC_DIR)/solidangle_mod.f90 \
 				  $(SRC_DIR)/solidangle_mex.f90 \
 	              $(SRC_DIR)/ellipsoid_mesh_mod.f90 \
-	              $(SRC_DIR)/lap3d_mod.f90
+	              $(SRC_DIR)/lap3d_mod.f90 \
+	              $(SRC_DIR)/lap3d_simd_mod.f90
 	              
 
 LQ_OBJECTS := $(patsubst $(SRC_DIR)/%.f90, $(BLD_DIR)/%.o, $(LQ_SOURCES)) \
-		              $(BLD_DIR)/hdf5_io.o
+		              $(BLD_DIR)/hdf5_io.o \
+		              $(BLD_DIR)/lap3d_simd.o
 
 LIB := $(BLD_DIR)/libLineQuaaadrature.a
 
@@ -106,8 +108,10 @@ TEST_SRC     := $(ROOT)/test/solid_angle/test_solid_angle.f90
 TEST_BIN     := $(BLD_DIR)/test_solid_angle
 TEST_R128_SRC := $(ROOT)/test/solid_angle/test_solid_angle_r128.f90
 TEST_R128_BIN := $(BLD_DIR)/test_solid_angle_r128
+TEST_FAST_SRC := $(ROOT)/test/solid_angle/test_solid_angle_fast.f90
+TEST_FAST_BIN := $(BLD_DIR)/test_solid_angle_fast
 
-.PHONY: all mex lib test test_r128 clean
+.PHONY: all mex lib test test_r128 test_fast clean
 
 all:
 	@echo "LineQuaaadrature build targets"
@@ -116,6 +120,7 @@ all:
 	@echo "  make -f Makefile lib        build build/libLineQuaaadrature.a"
 	@echo "  make -f Makefile test       build build/test_solid_angle"
 	@echo "  make -f Makefile test_r128  build build/test_solid_angle_r128"
+	@echo "  make -f Makefile test_fast  build build/test_solid_angle_fast"
 	@echo "  make -f Makefile clean      remove build artifacts"
 	@echo ""
 
@@ -126,6 +131,8 @@ lib: $(LIB)
 test: $(TEST_BIN)
 
 test_r128: $(TEST_R128_BIN)
+
+test_fast: $(TEST_FAST_BIN)
 
 $(TEST_BIN): $(LIB) $(TEST_SRC) | $(BLD_DIR)
 	$(FC) $(FFLAGS) -fopenmp $(TEST_SRC) -L$(BLD_DIR) -lLineQuaaadrature \
@@ -142,8 +149,17 @@ $(BLD_DIR):
 $(BLD_DIR)/%.o: $(SRC_DIR)/%.f90 | $(BLD_DIR)
 	$(FC) $(FFLAGS) -c $< -o $@
 
+$(BLD_DIR)/lap3d_simd.o: $(SRC_DIR)/lap3d_simd.c | $(BLD_DIR)
+	$(CC) -c -fPIC -O3 -march=native -ffp-contract=off $< -o $@
+
 $(BLD_DIR)/hdf5_io.o: $(SRC_DIR)/hdf5_io.c | $(BLD_DIR)
 	$(CC) -c -fPIC $(HDF5_INC) $< -o $@
+
+$(BLD_DIR)/lap3d_simd_mod.o: $(BLD_DIR)/linequaaadrature_mod.o
+
+$(TEST_FAST_BIN): $(LIB) $(TEST_FAST_SRC) | $(BLD_DIR)
+	$(FC) $(FFLAGS) -fopenmp $(TEST_FAST_SRC) -L$(BLD_DIR) -lLineQuaaadrature \
+	  $(OPENBLAS_LIBS) -lgfortran -lm -o $(TEST_FAST_BIN)
 
 $(BLD_DIR)/kernel_mod.o: $(BLD_DIR)/linequaaadrature_mod.o
 

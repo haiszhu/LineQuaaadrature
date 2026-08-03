@@ -13,7 +13,8 @@ module lap3d_mod
   use linequaaadrature_mod, only: r64, r128
   implicit none
   private
-  public :: lap3ddlpmat_r64, lap3ddlp_direct_r64, lap3ddlp_direct_r128, lap3ddlpmat_r128
+  public :: lap3ddlpmat_r64, lap3dslpmat_r64, lap3dsdlpmat_r64, &
+            lap3ddlp_direct_r64, lap3ddlp_direct_r128, lap3ddlpmat_r128
 
 contains
 
@@ -62,6 +63,68 @@ contains
     end do
 
   end subroutine lap3ddlpmat_r64
+
+  subroutine lap3dslpmat_r64(m, r0, n, r, w, A)
+    integer(8), intent(in)  :: m, n
+    real(r64),  intent(in)  :: r0(3,m), r(3,n), w(n)
+    real(r64),  intent(out) :: A(m,n)
+
+    real(r64), parameter :: pi4inv = 1.0_r64 / (4.0_r64 * &
+        3.14159265358979323846264338327950288_r64)
+    real(r64), parameter :: rr_min = 1.0e-300_r64
+
+    integer(8) :: i, j
+    real(r64)  :: dx, dy, dz, rr
+
+    do j = 1_8, n
+      do i = 1_8, m
+        dx = r0(1,i) - r(1,j)
+        dy = r0(2,i) - r(2,j)
+        dz = r0(3,i) - r(3,j)
+        rr = dx*dx + dy*dy + dz*dz
+        if (rr > rr_min) then
+          A(i,j) = pi4inv * w(j) / sqrt(rr)
+        else
+          A(i,j) = 0.0_r64
+        end if
+      end do
+    end do
+
+  end subroutine lap3dslpmat_r64
+
+  subroutine lap3dsdlpmat_r64(m, r0, n, r, rn, w, As, Ad)
+    integer(8), intent(in)  :: m, n
+    real(r64),  intent(in)  :: r0(3,m), r(3,n), rn(3,n), w(n)
+    real(r64),  intent(out) :: As(m,n), Ad(m,n)
+
+    real(r64), parameter :: pi4inv = 1.0_r64 / (4.0_r64 * &
+        3.14159265358979323846264338327950288_r64)
+    real(r64), parameter :: rr_min = 1.0e-300_r64
+
+    integer(8) :: i, j
+    real(r64)  :: dx, dy, dz, rr, rinv, wj, dotn, sj
+
+    do j = 1_8, n
+      wj = pi4inv*w(j)
+      do i = 1_8, m
+        dx = r0(1,i) - r(1,j)
+        dy = r0(2,i) - r(2,j)
+        dz = r0(3,i) - r(3,j)
+        rr = dx*dx + dy*dy + dz*dz
+        if (rr > rr_min) then
+          rinv    = 1.0_r64 / sqrt(rr)
+          sj      = wj * rinv
+          dotn    = dx*rn(1,j) + dy*rn(2,j) + dz*rn(3,j)
+          As(i,j) = sj
+          Ad(i,j) = sj * dotn / rr
+        else
+          As(i,j) = 0.0_r64
+          Ad(i,j) = 0.0_r64
+        end if
+      end do
+    end do
+
+  end subroutine lap3dsdlpmat_r64
 
   ! ------------------------------------------------------------------
   ! lap3ddlp_direct_r64
