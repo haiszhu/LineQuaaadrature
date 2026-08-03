@@ -31,6 +31,72 @@ module lq_kernel_mod
   integer(8), parameter :: KERNEL_ASVESTAS    = 1_8   ! Asvestas solid-angle kernel, kdata(1:3)=qhat
   integer(8), parameter :: KERNEL_MOMENTS_MN  = 2_8   ! Line-segment moments; ncol=2*(order+1), packed [N|M]; kdata unused
 
+  real(r64), parameter :: COEFF_I1(50) = [ &
+    0.5_r64, -0.125_r64, 0.0625_r64, -0.0390625_r64, 0.02734375_r64, -0.0205078125_r64, &
+    0.01611328125_r64, -0.013092041015625_r64, 0.0109100341796875_r64, &
+    -0.009273529052734375_r64, 0.0080089569091796875_r64, &
+    -0.0070078372955322265625_r64, 0.00619924068450927734375_r64, &
+    -0.0055350363254547119140625_r64, 0.00498153269290924072265625_r64, &
+    -0.0045145140029489994049072265625_r64, 0.00411617453210055828094482421875_r64, &
+    -0.0037731599877588450908660888671875_r64, &
+    0.0034752789360936731100082397460938_r64, &
+    -0.0032146330158866476267576217651367_r64, 0.002985016371894744224846363067627_r64, &
+    -0.0027814925283564662095159292221069_r64, &
+    0.0026000908417245227610692381858826_r64, &
+    -0.0024375851641167400885024107992649_r64, 0.002291330054269735683192266151309_r64, &
+    -0.0021591379357541740091619431041181_r64, &
+    0.0020391858282122754530973907094449_r64, &
+    -0.0019299437302723321252528876357246_r64, &
+    0.0018301190545685908084294624131871_r64, &
+    -0.0017386131018401612680079892925278_r64, 0.001654486661428540561491473681599_r64, &
+    -0.0015769325991740777226715608527741_r64, &
+    0.0015052538446661650989137626321934_r64, &
+    -0.0014388455868132460504322731043025_r64, &
+    0.0013771807759498212196994613998324_r64, &
+    -0.0013197982436185786688786505081727_r64, 0.001266292909417825479599786298382_r64, &
+    -0.0012163076629934376317208473655511_r64, &
+    0.0011695265990321515689623532361068_r64, &
+    -0.0011256693515684458851262649897528_r64, &
+    0.0010844863265110637185972552950058_r64, &
+    -0.0010457546719928114429330676058984_r64, &
+    0.0010092748578535273228307512940647_r64, &
+    -0.00097486776042670252773424840903981_r64, &
+    0.00094237216841247911014310679540515_r64, &
+    -0.00091164264118163740002974461729411_r64, &
+    0.00088254766327158514258198681035919_r64, &
+    -0.00085496804879434810687629972253547_r64, &
+    0.00082879555750472520564539258817214_r64, &
+    -0.00080393169077958344947603081052697_r64 ]
+  real(r64), parameter :: COEFF_I3(30) = [ &
+    0.375_r64, -0.3125_r64, 0.2734375_r64, -0.24609375_r64, 0.2255859375_r64, &
+    -0.20947265625_r64, 0.196380615234375_r64, -0.1854705810546875_r64, &
+    0.17619705200195312_r64, -0.16818809509277344_r64, 0.16118025779724121_r64, &
+    -0.15498101711273193_r64, 0.14944598078727722_r64, -0.14446444809436798_r64, &
+    0.13994993409141898_r64, -0.13583375955931842_r64, 0.13206059957155958_r64, &
+    -0.12858532063546591_r64, 0.12537068761957926_r64, -0.12238567124768451_r64, &
+    0.11960417871932805_r64, -0.11700408787760352_r64, 0.11456650271348678_r64, &
+    -0.11227517265921705_r64, 0.11011603472346287_r64, -0.1080768488952506_r64, &
+    0.10614690516497827_r64, -0.10431678611040968_r64, 0.10257817300856951_r64, &
+    -0.10092368634714097_r64 ]
+  real(r64), parameter :: COEFF_I5(50) = [ &
+    0.41666666666666667_r64, -0.546875_r64, 0.65625_r64, -0.751953125_r64, &
+    0.837890625_r64, -0.91644287109375_r64, 0.98917643229166667_r64, &
+    -1.0571823120117188_r64, 1.1212539672851562_r64, -1.1819885571797688_r64, &
+    1.2398481369018555_r64, -1.2951985001564026_r64, 1.3483348488807678_r64, &
+    -1.3994993409141898_r64, 1.4488934352993965_r64, -1.4966867951443419_r64, &
+    1.5430238476255909_r64, -1.5880287098480039_r64, 1.6318089499691268_r64, &
+    -1.6744585020705927_r64, 1.716059955538185_r64, -1.7566863749401307_r64, &
+    1.7964027625474728_r64, -1.8352672453910479_r64, 1.8733320475176771_r64, &
+    -1.9106442929696088_r64, 1.9472466740609806_r64, -1.9831780114990105_r64, &
+    2.0184737269428195_r64, -2.053166244124649_r64, 2.0872853312704156_r64, &
+    -2.1208583949627249_r64, 2.1539107335855205_r64, -2.1864657569281118_r64, &
+    2.2185451773000304_r64, -2.2501691765378595_r64, 2.2813565525120505_r64, &
+    -2.3121248481215879_r64, 2.3424904652638978_r64, -2.3724687658610248_r64, &
+    2.4020741616913952_r64, -2.4313201945041962_r64, 2.4602196076688454_r64, &
+    -2.4887844104258701_r64, 2.5170259356505609_r64, -2.5449548919111762_r64, &
+    2.5725814104946672_r64, -2.5999150879811728_r64, 2.6269650248709331_r64, &
+    -2.6537398607013483_r64 ]
+
   logical :: lq_profile_enabled_r64 = .false.
   integer(8) :: lq_profile_kernel_eval_calls_r64 = 0_8
   integer(8) :: lq_profile_compress_calls_r64 = 0_8
@@ -348,7 +414,7 @@ contains
                                     tpan, upan, wpan, &
                                     xpan, ypan, zpan, &
                                     xdisp, ydisp, zdisp, &
-                                    stangpan, sppan, dswpan)
+                                    stangpan, sppan, dswpan, factor_in)
     real(r64),  intent(in)    :: t0
     integer(8), intent(in)    :: nquad, npan, lenl, lenr
     real(r64),  intent(in)    :: tgl(nquad), wgl(nquad)
@@ -358,7 +424,9 @@ contains
     real(r64),  intent(inout) :: xpan(nquad,npan), ypan(nquad,npan), zpan(nquad,npan)
     real(r64),  intent(inout) :: xdisp(nquad,npan), ydisp(nquad,npan), zdisp(nquad,npan)
     real(r64),  intent(inout) :: stangpan(3,nquad,npan), sppan(nquad,npan), dswpan(nquad,npan)
-    real(r64), parameter :: factor = 2.0_r64
+    real(r64),  intent(in), optional :: factor_in
+
+    real(r64)  :: factor
     integer(8) :: ipan, k
     real(r64)  :: rhoL, rhoR, ua, ub, h, c
     real(r64)  :: ubreak(npan+1)
@@ -367,6 +435,8 @@ contains
     real(r64)  :: ppan(nquad,nquad), dppan(nquad,nquad), qpan(nquad,nquad)
     real(r64)  :: dxpan(nquad), dypan(nquad), dzpan(nquad)
     real(r64)  :: rk, rkp1
+    factor = 2.0_r64
+    if (present(factor_in)) factor = factor_in
     if (npan /= lenl + lenr) error stop 'build_nearroot_panels_local: npan /= lenl + lenr'
     if (npan < 1_8) error stop 'build_nearroot_panels_local: npan < 1'
     if (t0 < -1.0_r64 .or. t0 > 1.0_r64) error stop 'build_nearroot_panels_local: t0 outside [-1,1]'
@@ -463,15 +533,21 @@ contains
     if (minval(w_ref) <= 0.0_r64) error stop 'nearroot grid selftest: non-positive weights'
   end subroutine check_nearroot_grid_selftest_r64
 
-  subroutine estimate_nearroot_lengths_r64(t_root, root_imag_abs, max_len_each_side, len, lenl, lenr)
+  subroutine estimate_nearroot_lengths_r64(t_root, root_imag_abs, max_len_each_side, &
+                                           len, lenl, lenr, factor_in, coeff_in)
     real(r64),  intent(in)  :: t_root, root_imag_abs
     integer(8), intent(in)  :: max_len_each_side
     integer(8), intent(out) :: len, lenl, lenr
+    real(r64),  intent(in), optional :: factor_in, coeff_in
 
-    ! real(r64), parameter :: factor = 3.0_r64
-    real(r64), parameter :: factor = 2.0_r64
+    real(r64) :: factor, coeff
     real(r64) :: dist, target_width
     integer(8) :: levels
+
+    factor = 2.0_r64
+    if (present(factor_in)) factor = factor_in
+    coeff = 1.0_r64
+    if (present(coeff_in)) coeff = coeff_in
 
     ! Distance from the complex root to the real panel [-1,1].
     !
@@ -492,7 +568,7 @@ contains
     dist = max(dist, tiny(1.0_r64))
     target_width = min(2.0_r64, 2.0_r64*dist)
 
-    levels = ceiling(log(2.0_r64/target_width)/log(factor)) + 1_8
+    levels = ceiling(log(coeff*2.0_r64/target_width)/log(factor)) + 1_8
     levels = max(1_8, min(levels, max_len_each_side))
 
     if (t_root >= 1.0_r64) then
@@ -1804,14 +1880,52 @@ contains
                                                 integrand0_up, &
                                                 funvals0, weights)
     end block
-  contains
-    real(r64) function bernstein_radius(re_t, im_t)
-      real(r64), intent(in) :: re_t, im_t
-      complex(r64) :: zz
-      zz = cmplx(re_t, im_t, kind=r64)
-      bernstein_radius = abs(zz + sqrt(zz - 1.0_r64)*sqrt(zz + 1.0_r64))
-    end function bernstein_radius
   end subroutine build_target_nearroot_weights_local_r64
+
+  real(r64) function bernstein_radius(re_t, im_t)
+    real(r64), intent(in) :: re_t, im_t
+    complex(r64) :: zz
+    zz = cmplx(re_t, im_t, kind=r64)
+    bernstein_radius = abs(zz + sqrt(zz - 1.0_r64)*sqrt(zz + 1.0_r64))
+  end function bernstein_radius
+
+  subroutine update_refinement_codes_r64(m, sbdnp, nquad, lens, troot, rfc, rho_in)
+    integer(8),   intent(in)    :: m, sbdnp, nquad, lens(3)
+    complex(r64), intent(in)    :: troot(m, sbdnp)
+    integer(8),   intent(inout) :: rfc(m, sbdnp)
+    real(r64),    intent(in), optional :: rho_in
+
+    real(r64)    :: rho, panlen, panmid
+    complex(r64) :: z
+    integer(8)   :: ell, j, lev, i
+
+    rho = 8.0_r64**(16.0_r64/real(nquad, r64))
+    if (present(rho_in)) rho = rho_in
+
+    do ell = 1, sbdnp
+      do j = 1, m
+        if (rfc(j,ell) > 0_8 .and. &
+            bernstein_radius(real(troot(j,ell), r64), aimag(troot(j,ell))) < rho) then
+          rfc(j,ell) = 1_8
+        else
+          rfc(j,ell) = 0_8
+        end if
+      end do
+      do lev = 1, 3
+        panlen = 2.0_r64/real(lens(lev), r64)
+        panmid = -panlen/2.0_r64 - 1.0_r64
+        do i = 1, lens(lev)
+          panmid = panmid + panlen
+          do j = 1, m
+            if (rfc(j,ell) > lev - 1_8) then
+              z = (troot(j,ell) - panmid)*2.0_r64/panlen
+              if (bernstein_radius(real(z, r64), aimag(z)) < rho) rfc(j,ell) = lev + 1_8
+            end if
+          end do
+        end do
+      end do
+    end do
+  end subroutine update_refinement_codes_r64
 
   subroutine build_target_nearroot_weights_r64(nquad, ncol, tgl, wgl, legmat, &
                                                xj, yj, zj, spj, stauj, &
@@ -2683,5 +2797,244 @@ contains
     deallocate(tgl2, wgl2, Dgl2)
 
   end subroutine line_quad_compress_nearroot_r128
+
+
+  real(r64) function legendre_eval_r64(n, chat, t) result(v)
+    integer(8), intent(in) :: n
+    real(r64),  intent(in) :: chat(n), t
+    real(r64)  :: pkm2, pkm1, pk
+    integer(8) :: k
+    pkm2 = 1.0_r64
+    v    = chat(1)*pkm2
+    if (n > 1_8) then
+      pkm1 = t
+      v = v + chat(2)*pkm1
+      do k = 3, n
+        pk = ((2.0_r64*real(k-2,r64) + 1.0_r64)*t*pkm1 &
+              - real(k-2,r64)*pkm2)/real(k-1,r64)
+        v = v + chat(k)*pk
+        pkm2 = pkm1;  pkm1 = pk
+      end do
+    end if
+  end function legendre_eval_r64
+
+
+  subroutine build_ssq_weights_r64(m, r0, rho_ssq, nbd, sxbd, sbdnp, nquad, &
+                                   tgl, wgl, Legmat, w1, w3, w5, &
+                                   troot, xroot, yroot, zroot, rfc, rfc_ssq)
+    use lq_adaptive_mod, only: line_quad_root_initial_guess_r64, &
+                               line_quad_root_refine_r64
+    integer(8),   intent(in)    :: m, nbd, sbdnp, nquad
+    real(r64),    intent(in)    :: r0(3,m), rho_ssq, sxbd(3,nbd)
+    real(r64),    intent(in)    :: tgl(nquad), wgl(nquad), Legmat(nquad,nquad)
+    real(r64),    intent(inout) :: w1(nquad,sbdnp,m)
+    real(r64),    intent(inout) :: w3(nquad,sbdnp,m)
+    real(r64),    intent(inout) :: w5(nquad,sbdnp,m)
+    complex(r64), intent(inout) :: troot(m,sbdnp), xroot(m,sbdnp)
+    complex(r64), intent(inout) :: yroot(m,sbdnp), zroot(m,sbdnp)
+    integer(8),   intent(inout) :: rfc(m,sbdnp), rfc_ssq(m)
+
+    real(r64)    :: r_ell(3,nquad), rho, tr
+    real(r64)    :: xh(nquad), yh(nquad), zh(nquad)
+    complex(r64) :: tinit, tk
+    integer(8)   :: ell, j, i0, n_expa, converged
+
+    rho    = 4.0_r64**(16.0_r64/real(nquad, r64))
+    n_expa = min(16_8, nquad)
+
+    do ell = 1, sbdnp
+      i0    = (ell-1_8)*nquad
+      r_ell = sxbd(:, i0+1:i0+nquad)
+
+      xh = matmul(Legmat, r_ell(1,:))
+      yh = matmul(Legmat, r_ell(2,:))
+      zh = matmul(Legmat, r_ell(3,:))
+
+      do j = 1, m
+        w1(:,ell,j)  = 0.0_r64
+        w3(:,ell,j)  = 0.0_r64
+        w5(:,ell,j)  = 0.0_r64
+        rfc(j,ell)   = 0_8
+        troot(j,ell) = (0.0_r64, 0.0_r64)
+        xroot(j,ell) = (0.0_r64, 0.0_r64)
+        yroot(j,ell) = (0.0_r64, 0.0_r64)
+        zroot(j,ell) = (0.0_r64, 0.0_r64)
+
+        call line_quad_root_initial_guess_r64(tgl, r_ell(1,:), r_ell(2,:), &
+             r_ell(3,:), nquad, r0(1,j), r0(2,j), r0(3,j), tinit)
+
+        if (bernstein_radius(real(tinit,r64), aimag(tinit)) < 1.5_r64*rho) then
+          converged = 0_8
+          call line_quad_root_refine_r64(xh(1:n_expa), yh(1:n_expa), zh(1:n_expa), &
+               n_expa, r0(1,j), r0(2,j), r0(3,j), tinit, tk, converged)
+          troot(j,ell) = tk
+          tr = real(tk, r64)
+          xroot(j,ell) = cmplx(legendre_eval_r64(n_expa, xh(1:n_expa), tr), 0.0_r64, r64)
+          yroot(j,ell) = cmplx(legendre_eval_r64(n_expa, yh(1:n_expa), tr), 0.0_r64, r64)
+          zroot(j,ell) = cmplx(legendre_eval_r64(n_expa, zh(1:n_expa), tr), 0.0_r64, r64)
+          if (converged == 1_8 .and. &
+              bernstein_radius(real(tk,r64), aimag(tk)) < rho) rfc(j,ell) = converged
+        end if
+
+        if (rfc(j,ell) == 1_8) then
+          block
+            real(r64) :: p1(nquad), p3(nquad), p5(nquad)
+            real(r64) :: zr, zi, b, c, d, u1, u2, ww, zi_over_w
+            real(r64) :: f, f1, f2, arg1, arg2, s, x1, x2, Fs1, Fs2
+            real(r64) :: bx2, bx2p, aa, aa2
+            integer(8) :: Ns, i, kk, jj
+            logical    :: in_cone, outside_interval, use_series
+
+            zr = real(tk, r64)
+            zi = aimag(tk)
+            b  = -2.0_r64*zr
+            c  = zr*zr + zi*zi
+            d  = zi*zi
+            u1 = sqrt((1.0_r64+zr)*(1.0_r64+zr) + zi*zi)
+            u2 = sqrt((1.0_r64-zr)*(1.0_r64-zr) + zi*zi)
+
+            if (4.0_r64*abs(zi) < 1.0_r64 - abs(zr)) then
+              Ns = 11_8
+              x1 = 1.0_r64 - abs(zr)
+              f  = 0.0_r64
+              bx2  = zi*zi/(x1*x1)
+              bx2p = 1.0_r64
+              do i = 1, Ns
+                bx2p = bx2p*bx2
+                f = f + COEFF_I1(i)*bx2p
+              end do
+              arg1 = (1.0_r64 - abs(zr))*f
+              arg2 = 1.0_r64 + abs(zr) + sqrt((1.0_r64+abs(zr))*(1.0_r64+abs(zr)) + zi*zi)
+              p1(1) = log(arg2) - log(arg1)
+            else
+              arg1 = -1.0_r64 + abs(zr) + sqrt((-1.0_r64+abs(zr))*(-1.0_r64+abs(zr)) + zi*zi)
+              arg2 =  1.0_r64 + abs(zr) + sqrt(( 1.0_r64+abs(zr))*( 1.0_r64+abs(zr)) + zi*zi)
+              p1(1) = log(arg2) - log(arg1)
+            end if
+            if (nquad > 1_8) then
+              p1(2) = u2 - u1 - b/2.0_r64*p1(1)
+              s = 1.0_r64
+              do i = 2, nquad-1
+                s = -s
+                p1(i+1) = (u2 - s*u1 + 0.5_r64*(1.0_r64-2.0_r64*real(i,r64))*b*p1(i) &
+                           - real(i-1,r64)*c*p1(i-1))/real(i,r64)
+              end do
+            end if
+
+            ww = min(abs(1.0_r64+zr), abs(1.0_r64-zr))
+            zi = abs(zi)
+            zi_over_w = zi/ww
+            outside_interval = (abs(zr) > 1.0_r64)
+
+            in_cone    = (zi_over_w < 0.6_r64)
+            use_series = (outside_interval .and. in_cone)
+            if (.not. use_series) then
+              p3(1) = (b+2.0_r64)/(2.0_r64*d*u2) - (b-2.0_r64)/(2.0_r64*d*u1)
+            else
+              if      (zi_over_w < 0.01_r64) then;  Ns = 4_8
+              else if (zi_over_w < 0.1_r64)  then;  Ns = 10_8
+              else if (zi_over_w < 0.2_r64)  then;  Ns = 15_8
+              else;                                 Ns = 30_8
+              end if
+              x1 = -1.0_r64 - zr
+              x2 =  1.0_r64 - zr
+              f1 = 0.0_r64;  f2 = 0.0_r64
+              bx2 = zi*zi/(x1*x1);  bx2p = 1.0_r64
+              do i = 1, Ns
+                bx2p = bx2p*bx2
+                f1 = f1 + COEFF_I3(i)*bx2p
+              end do
+              bx2 = zi*zi/(x2*x2);  bx2p = 1.0_r64
+              do i = 1, Ns
+                bx2p = bx2p*bx2
+                f2 = f2 + COEFF_I3(i)*bx2p
+              end do
+              Fs1 = abs(x1)/(x1*x1*x1)*(-0.5_r64 + f1)
+              Fs2 = abs(x2)/(x2*x2*x2)*(-0.5_r64 + f2)
+              p3(1) = Fs2 - Fs1
+            end if
+            if (nquad > 1_8) then
+              p3(2) = 1.0_r64/u1 - 1.0_r64/u2 - b/2.0_r64*p3(1)
+              do i = 2, nquad-1
+                p3(i+1) = p1(i-1) - b*p3(i) - c*p3(i-1)
+              end do
+            end if
+
+            in_cone    = (zi_over_w < 0.7_r64)
+            use_series = (outside_interval .and. in_cone)
+            if (.not. use_series) then
+              p5(1) = (2.0_r64+b)/(6.0_r64*d*u2**3) - (-2.0_r64+b)/(6.0_r64*d*u1**3) &
+                      + 2.0_r64/(3.0_r64*d)*p3(1)
+            else
+              if      (zi_over_w < 0.01_r64) then;  Ns = 4_8
+              else if (zi_over_w < 0.2_r64)  then;  Ns = 10_8
+              else if (zi_over_w < 0.5_r64)  then;  Ns = 24_8
+              else if (zi_over_w < 0.6_r64)  then;  Ns = 35_8
+              else;                                 Ns = 50_8
+              end if
+              x1 = -1.0_r64 - zr
+              x2 =  1.0_r64 - zr
+              f1 = 0.0_r64;  f2 = 0.0_r64
+              bx2 = zi*zi/(x1*x1);  bx2p = 1.0_r64
+              do i = 1, Ns
+                bx2p = bx2p*bx2
+                f1 = f1 + COEFF_I5(i)*bx2p
+              end do
+              bx2 = zi*zi/(x2*x2);  bx2p = 1.0_r64
+              do i = 1, Ns
+                bx2p = bx2p*bx2
+                f2 = f2 + COEFF_I5(i)*bx2p
+              end do
+              Fs1 = 1.0_r64/(x1*x1*x1*abs(x1))*(-0.25_r64 + f1)
+              Fs2 = 1.0_r64/(x2*x2*x2*abs(x2))*(-0.25_r64 + f2)
+              p5(1) = Fs2 - Fs1
+            end if
+            if (nquad > 1_8) then
+              p5(2) = 1.0_r64/(3.0_r64*u1*u1*u1) - 1.0_r64/(3.0_r64*u2*u2*u2) &
+                      - 0.5_r64*b*p5(1)
+              do i = 2, nquad-1
+                p5(i+1) = p3(i-1) - b*p5(i) - c*p5(i-1)
+              end do
+            end if
+
+            do kk = 1, nquad
+              do jj = nquad, kk+1, -1
+                p1(jj) = p1(jj) - tgl(kk)*p1(jj-1)
+                p3(jj) = p3(jj) - tgl(kk)*p3(jj-1)
+                p5(jj) = p5(jj) - tgl(kk)*p5(jj-1)
+              end do
+            end do
+            do kk = nquad-1, 1, -1
+              do jj = kk+1, nquad
+                p1(jj) = p1(jj)/(tgl(jj) - tgl(jj-kk))
+                p3(jj) = p3(jj)/(tgl(jj) - tgl(jj-kk))
+                p5(jj) = p5(jj)/(tgl(jj) - tgl(jj-kk))
+              end do
+              do jj = kk, nquad-1
+                p1(jj) = p1(jj) - p1(jj+1)
+                p3(jj) = p3(jj) - p3(jj+1)
+                p5(jj) = p5(jj) - p5(jj+1)
+              end do
+            end do
+
+            do i = 1, nquad
+              aa  = abs(cmplx(tgl(i), 0.0_r64, r64) - tk)
+              aa2 = aa*aa
+              w1(i,ell,j) = p1(i)*aa
+              w3(i,ell,j) = p3(i)*aa*aa2
+              w5(i,ell,j) = p5(i)*aa*aa2*aa2
+            end do
+          end block
+        else
+          w1(:,ell,j) = wgl
+          w3(:,ell,j) = wgl
+          w5(:,ell,j) = wgl
+        end if
+
+        if (rfc(j,ell) > 0_8 .and. abs(aimag(troot(j,ell))) < rho_ssq &
+            .and. abs(real(troot(j,ell), r64)) < 1.0_r64 + rho_ssq) rfc_ssq(j) = 1_8
+      end do
+    end do
+  end subroutine build_ssq_weights_r64
 
 end module lq_kernel_mod

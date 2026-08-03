@@ -327,6 +327,17 @@ end
 # FORTRAN evaluate_solid_angle_integral(int[1] m, double[3,m] tx, int[1] n, double[3,n] sx, double[3,n] snx, double[n] sw, double[3,3] r_vert, int[1] nbd, double[3,nbd] sxbd_in, int[1] use_nearroot, inout double[m] IalphaAsvestas);
 end
 
+@function [IalphaAsvestas] = lqs_evaluate_solid_angle_integral_fast_mex(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+m   = double(m);
+n   = double(n);
+nbd = double(nbd);
+if nargin < 10 || isempty(IalphaAsvestas)
+  IalphaAsvestas = zeros(m, 1);
+end
+# FORTRAN lqs_evaluate_solid_angle_integral_fast_mex(int[1] m, double[3,m] tx, int[1] n, double[3,n] sx, double[3,n] snx, double[n] sw, double[3,3] r_vert, int[1] nbd, double[3,nbd] sxbd_in, inout double[m] IalphaAsvestas);
+end
+
+
 % --------------------------------------------------------------------------
 % line_quad_compress_mex: error-driven GL bisection weight compression.
 %
