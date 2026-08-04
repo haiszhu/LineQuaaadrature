@@ -55,10 +55,10 @@ contains
     allocate(tgl(nquad), wgl(nquad), Dgl(nquad,nquad))
     allocate(w_bclag(nquad))
     allocate(Legmat(nquad,nquad), vtmp(nquad,nquad))
-    allocate(txnew(3,m), snxnew(3,n), sxpbd(3,nbd))
+    allocate(txnew(3,1), snxnew(3,n), sxpbd(3,nbd))
     allocate(sxbd(3,nbd), stangbd(3,nbd), sspbd(nbd))
-    allocate(kdata(3,m))
-    allocate(funvals(nquad,sbdnp,m), sxbdw(nquad,sbdnp,m))
+    allocate(kdata(3,1))
+    allocate(funvals(nquad,sbdnp,1), sxbdw(nquad,sbdnp,1))
     allocate(bclagmatlr(nquad,2))
 
     ! --- GL quadrature ---
@@ -98,17 +98,13 @@ contains
     R = 0.0_r64;  c = 0.0_r64;  alpha = 0.0_r64
     call circumcircle_transform_3d(r_vert, R, c, alpha)
 
-    ! --- apply transform ---
-    do j = 1, m
-      txnew(:,j) = alpha * matmul(R, tx(:,j) - c)
-    end do
     do j = 1, n
       snxnew(:,j) = matmul(R, snx(:,j))
     end do
     do k = 1, nbd
-      sxbd(:,k)    = alpha * matmul(R, sxbd(:,k) - c)
       stangbd(:,k) = matmul(R, stangbd(:,k))
     end do
+    txnew = 0.0_r64
 
     ! --- qhat = mean(snxnew) / norm (iside=0) ---
     qhat = 0.0_r64
@@ -119,60 +115,56 @@ contains
     qnrm = sqrt(qhat(1)**2 + qhat(2)**2 + qhat(3)**2)
     qhat = qhat / qnrm
 
-    ! --- sxpbd = Dgl * sxbd per panel ---
-    sxpbd = 0.0_r64
-    do ell = 1, sbdnp
-      idx_start = (ell-1)*nquad + 1
-      idx_end   = ell*nquad
-      sxpbd(1,idx_start:idx_end) = matmul(Dgl, sxbd(1,idx_start:idx_end))
-      sxpbd(2,idx_start:idx_end) = matmul(Dgl, sxbd(2,idx_start:idx_end))
-      sxpbd(3,idx_start:idx_end) = matmul(Dgl, sxbd(3,idx_start:idx_end))
-    end do
-
-    ! --- kdata, cfptr ---
-    do j = 1, m
-      kdata(:,j) = qhat
-    end do
     cfptr = c_funloc(asvestas_kernel_r64)
+    kdata(:,1) = qhat
 
-    if (use_nearroot) then
-      ! --- nearroot path: kernel eval + nearroot compress ---
-      funvals = 0.0_r64
-      call line_kernel_eval_r64(m, txnew, nbd, sbdnp, nquad, &
-                                sxbd, sxpbd, stangbd, cfptr, kdata, funvals)
-      allocate(funvals_nr(nquad,sbdnp,m,1), sxbdw_nr(nquad,sbdnp,m,1))
-      allocate(root_re(m,sbdnp), root_im(m,sbdnp), root_ok(m,sbdnp))
-      funvals_nr(:,:,:,1) = funvals
-      sxbdw_nr = 0.0_r64
-      root_re = 0.0_r64
-      root_im = 0.0_r64
-      root_ok = 0_8
-      call line_quad_compress_nearroot_r64(m, txnew, nbd, sbdnp, nquad, 1_8, &
-                                           sxbd, sxpbd, stangbd, sspbd,       &
-                                           tgl, wgl, Dgl, w_bclag,            &
-                                           Legmat, bclagmatlr,                &
-                                           cfptr, kdata, funvals_nr, sxbdw_nr,&
-                                           root_re, root_im, root_ok, KERNEL_ASVESTAS)
-      funvals = funvals_nr(:,:,:,1)
-      sxbdw   = sxbdw_nr(:,:,:,1)
-      deallocate(funvals_nr, sxbdw_nr, root_re, root_im, root_ok)
-
-    else
-      ! --- adaptive bisection path (all panels at once) ---
-      funvals = 0.0_r64
-      call line_kernel_eval_r64(m, txnew, nbd, sbdnp, nquad, &
-                                 sxbd, sxpbd, stangbd, cfptr, kdata, funvals)
-      sxbdw = 0.0_r64
-      call line_quad_compress_r64(m, txnew, nbd, sbdnp, nquad,  &
-                                   sxbd, sxpbd, stangbd, sspbd,  &
-                                   tgl, wgl, Dgl, w_bclag,       &
-                                   Legmat, bclagmatlr,            &
-                                   cfptr, kdata, funvals, sxbdw)
-    end if
+    allocate(funvals_nr(nquad,sbdnp,1,1), sxbdw_nr(nquad,sbdnp,1,1))
+    allocate(root_re(1,sbdnp), root_im(1,sbdnp), root_ok(1,sbdnp))
 
     do j = 1, m
-      IalphaAsvestas(j) = sum(funvals(:,:,j) * sxbdw(:,:,j))
+
+      do k = 1, nbd
+        sxbd(:,k) = alpha * matmul(R, sxbd_in(:,k) - tx(:,j))
+      end do
+
+      sxpbd = 0.0_r64
+      do ell = 1, sbdnp
+        idx_start = (ell-1)*nquad + 1
+        idx_end   = ell*nquad
+        sxpbd(1,idx_start:idx_end) = matmul(Dgl, sxbd(1,idx_start:idx_end))
+        sxpbd(2,idx_start:idx_end) = matmul(Dgl, sxbd(2,idx_start:idx_end))
+        sxpbd(3,idx_start:idx_end) = matmul(Dgl, sxbd(3,idx_start:idx_end))
+      end do
+
+      funvals = 0.0_r64
+      call line_kernel_eval_r64(1_8, txnew, nbd, sbdnp, nquad, &
+                                sxbd, sxpbd, stangbd, cfptr, kdata, funvals)
+
+      if (use_nearroot) then
+        funvals_nr(:,:,:,1) = funvals
+        sxbdw_nr = 0.0_r64
+        root_re = 0.0_r64;  root_im = 0.0_r64;  root_ok = 0_8
+        call line_quad_compress_nearroot_r64(1_8, txnew, nbd, sbdnp, nquad, 1_8, &
+                                             sxbd, sxpbd, stangbd, sspbd,        &
+                                             tgl, wgl, Dgl, w_bclag,             &
+                                             Legmat, bclagmatlr,                 &
+                                             cfptr, kdata, funvals_nr, sxbdw_nr, &
+                                             root_re, root_im, root_ok, KERNEL_ASVESTAS)
+        funvals = funvals_nr(:,:,:,1)
+        sxbdw   = sxbdw_nr(:,:,:,1)
+      else
+        sxbdw = 0.0_r64
+        call line_quad_compress_r64(1_8, txnew, nbd, sbdnp, nquad, &
+                                    sxbd, sxpbd, stangbd, sspbd,   &
+                                    tgl, wgl, Dgl, w_bclag,        &
+                                    Legmat, bclagmatlr,            &
+                                    cfptr, kdata, funvals, sxbdw)
+      end if
+
+      IalphaAsvestas(j) = sum(funvals(:,:,1) * sxbdw(:,:,1))
     end do
+
+    deallocate(funvals_nr, sxbdw_nr, root_re, root_im, root_ok)
 
     deallocate(tgl, wgl, Dgl, w_bclag, Legmat, vtmp)
     deallocate(sxbd, stangbd, sspbd, txnew, snxnew, sxpbd)
@@ -774,10 +766,13 @@ contains
                                            len3, sxbd3, stangbd3, swbd3, &
                                            qhat, tgl, wgl, Dgl, w_bclag, bclagmatlr, &
                                            troot, xroot, yroot, zroot, rfc, &
-                                           IalphaAsvestas, rho_in)
-    use lq_kernel_mod, only: estimate_nearroot_lengths_r64, &
-                             build_nearroot_nodes_r64, bary_row_r64, &
-                             update_refinement_codes_r64
+                                           IalphaAsvestas, rho_in, &
+                                           sxbd_raw, tx_raw, Rfr, alpha_fr, Legmat)
+    use lq_kernel_mod,   only: estimate_nearroot_lengths_r64, &
+                               build_nearroot_nodes_r64, bary_row_r64, &
+                               update_refinement_codes_r64
+    use lq_adaptive_mod, only: line_quad_root_initial_guess_r64, &
+                               line_quad_root_refine_r64
     integer(8),   intent(in)    :: m, nquad, nbd, sbdnp
     real(r64),    intent(in)    :: r0(3,m), qhat(3)
     real(r64),    intent(in)    :: sxbd(3,nbd), stangbd(3,nbd), sspbd(nbd)
@@ -793,6 +788,9 @@ contains
     integer(8),   intent(inout) :: rfc(m,nbd)
     real(r64),    intent(inout) :: IalphaAsvestas(m)
     real(r64),    intent(in), optional :: rho_in
+    real(r64),    intent(in), optional :: sxbd_raw(3,nbd), tx_raw(3,m)
+    real(r64),    intent(in), optional :: Rfr(3,3), alpha_fr
+    real(r64),    intent(in), optional :: Legmat(nquad,nquad)
 
     real(r64), parameter :: FAC = 3.0_r64, COEF = 15.0_r64
     integer(8) :: ell, j, idx_ell_start, idx_ell_end, k
@@ -810,6 +808,11 @@ contains
     real(r64) :: spk, t1, t2, t3, d1, d2, d3, dn, h1, h2, h3
     real(r64) :: c1, c2, c3, num, den, acc
     real(r64) :: brow(nquad)
+    real(r64) :: r_ellL(3,nquad), rpL(3,nquad), rlL(3), rrL(3), rlrL(3,2)
+    real(r64) :: xh(nquad), yh(nquad), zh(nquad)
+    complex(r64) :: tinit, tr
+    integer(8) :: ifconv
+    logical    :: shifted
     real(r64) :: r_ell1(3,len1*nquad), w_ell1(len1*nquad), tau_ell1(3,len1*nquad)
     real(r64) :: r_ell2(3,len2*nquad), w_ell2(len2*nquad), tau_ell2(3,len2*nquad)
     real(r64) :: r_ell3(3,len3*nquad), w_ell3(len3*nquad), tau_ell3(3,len3*nquad)
@@ -882,10 +885,46 @@ contains
         rfcj = rfc(j,ell)
 
         if (rfcj >= 4_8) then
+          r_ellL = r_ell;  rpL = rp;  rlL = rl;  rrL = rr
+          shifted = .false.
+          if (present(sxbd_raw) .and. present(tx_raw) .and. present(Rfr) .and. &
+              present(alpha_fr) .and. present(Legmat)) then
+            do k = 1, nquad
+              d1 = sxbd_raw(1, idx_ell_start+k-1_8) - tx_raw(1,j)
+              d2 = sxbd_raw(2, idx_ell_start+k-1_8) - tx_raw(2,j)
+              d3 = sxbd_raw(3, idx_ell_start+k-1_8) - tx_raw(3,j)
+              r_ellL(1,k) = alpha_fr*(Rfr(1,1)*d1 + Rfr(1,2)*d2 + Rfr(1,3)*d3)
+              r_ellL(2,k) = alpha_fr*(Rfr(2,1)*d1 + Rfr(2,2)*d2 + Rfr(2,3)*d3)
+              r_ellL(3,k) = alpha_fr*(Rfr(3,1)*d1 + Rfr(3,2)*d2 + Rfr(3,3)*d3)
+            end do
+            xh = matmul(Legmat, r_ellL(1,:))
+            yh = matmul(Legmat, r_ellL(2,:))
+            zh = matmul(Legmat, r_ellL(3,:))
+            tinit = troot(j,ell)
+            ifconv = 0_8
+            call line_quad_root_refine_r64(xh, yh, zh, nquad, &
+                 0.0_r64, 0.0_r64, 0.0_r64, tinit, tr, ifconv)
+            if (ifconv == 1_8) then
+              rpL  = matmul(r_ellL, DglT)
+              rlrL = matmul(r_ellL, bclagmatlr)
+              rlL  = rlrL(:,1);  rrL = rlrL(:,2)
+              t_rootjr = real(tr, r64)
+              call bary_row_r64(nquad, tgl, w_bclag, t_rootjr, brow)
+              r_root(1) = dot_product(r_ellL(1,:), brow)
+              r_root(2) = dot_product(r_ellL(2,:), brow)
+              r_root(3) = dot_product(r_ellL(3,:), brow)
+              r0j = 0.0_r64
+              shifted = .true.
+            end if
+          end if
+          if (.not. shifted) then
+            r_ellL = r_ell;  rpL = rp;  rlL = rl;  rrL = rr
+          end if
+
           if (t_rootjr >= 1.0_r64) then
-            sqn_dist = sqrt(dot_product(r0j - rr, r0j - rr))
+            sqn_dist = sqrt(dot_product(r0j - rrL, r0j - rrL))
           else if (t_rootjr <= -1.0_r64) then
-            sqn_dist = sqrt(dot_product(r0j - rl, r0j - rl))
+            sqn_dist = sqrt(dot_product(r0j - rlL, r0j - rlL))
           else
             sqn_dist = sqrt(dot_product(r0j - r_root, r0j - r_root))
           end if
@@ -898,8 +937,8 @@ contains
           allocate(r_up(3,nquad_up), rp_up(3,nquad_up))
           do k = 1, nquad_up
             call bary_row_r64(nquad, tgl, w_bclag, t_up(k), brow)
-            r_up(:,k)  = matmul(r_ell, brow)
-            rp_up(:,k) = matmul(rp, brow)
+            r_up(:,k)  = matmul(r_ellL, brow)
+            rp_up(:,k) = matmul(rpL, brow)
           end do
           acc = 0.0_r64
           do k = 1, nquad_up
@@ -1112,7 +1151,8 @@ contains
          len2, sxbd2, stangbd2, swbd2, &
          len3, sxbd3, stangbd3, swbd3, &
          qhat, tgl, wgl, Dgl, w_bclag, bclagmatlr, &
-         troot, xroot, yroot, zroot, rfc, IalphaAsvestas)
+         troot, xroot, yroot, zroot, rfc, IalphaAsvestas, &
+         sxbd_raw=sxbd_in, tx_raw=tx, Rfr=R, alpha_fr=alpha, Legmat=Legmat)
 
   contains
 

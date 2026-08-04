@@ -1578,7 +1578,7 @@ contains
     integer(8),     intent(in)    :: kernel_id
 
     integer(8), parameter :: maxpan = 128_8
-    integer(8), parameter :: max_len_each_side = 12_8
+    integer(8), parameter :: max_len_each_side = 24_8
 
     real(r64)    :: rho
     integer(8)   :: n_expa
