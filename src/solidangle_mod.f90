@@ -3,6 +3,13 @@ module solidangle_mod
   use iso_c_binding, only: c_long_long
   implicit none
 
+  integer(8), save :: LQS_PROF = 0_8
+  integer(8), save :: lqs_rfc_hist(0:8) = 0_8
+  integer(8), save :: lqs_len_hist(0:64) = 0_8
+  integer(8), save :: lqs_nodes_adap = 0_8
+  real(r64),  save :: lqs_t_adap = 0.0_r64
+  real(r64),  save :: lqs_t_unif = 0.0_r64
+
 contains
 
   ! ------------------------------------------------------------------
@@ -792,7 +799,7 @@ contains
     real(r64),    intent(in), optional :: Rfr(3,3), alpha_fr
     real(r64),    intent(in), optional :: Legmat(nquad,nquad)
 
-    real(r64), parameter :: FAC = 3.0_r64, COEF = 15.0_r64
+    real(r64), parameter :: FAC = 3.0_r64, COEF = 1.0_r64
     integer(8) :: ell, j, idx_ell_start, idx_ell_end, k
     real(r64) :: r_ell(3,nquad), tau_ell(3,nquad)
     real(r64) :: x_ell(nquad), y_ell(nquad), z_ell(nquad), w_ell(nquad)
@@ -804,14 +811,14 @@ contains
     real(r64) :: rlr(3,2), rl(3), rr(3), rp(3,nquad), DglT(nquad,nquad)
     real(r64) :: pan_len, sqn_dist
     integer(8) :: len, lenl, lenr, nquad_up
-    real(r64), allocatable :: r_up(:,:), rp_up(:,:), t_up(:), w_ref(:)
+    real(r64), allocatable :: r_up(:,:), rp_up(:,:), t_up(:), w_ref(:), Bup(:,:)
     real(r64) :: spk, t1, t2, t3, d1, d2, d3, dn, h1, h2, h3
     real(r64) :: c1, c2, c3, num, den, acc
     real(r64) :: brow(nquad)
     real(r64) :: r_ellL(3,nquad), rpL(3,nquad), rlL(3), rrL(3), rlrL(3,2)
-    real(r64) :: xh(nquad), yh(nquad), zh(nquad)
-    complex(r64) :: tinit, tr
-    integer(8) :: ifconv
+    real(r64) :: lqs_t0, lqs_t1
+    complex(r64) :: browc(nquad), dvecc(nquad), rc(3), rpc(3), Fc, Fpc, dtc, tr
+    integer(8) :: ifconv, it, kmin
     logical    :: shifted
     real(r64) :: r_ell1(3,len1*nquad), w_ell1(len1*nquad), tau_ell1(3,len1*nquad)
     real(r64) :: r_ell2(3,len2*nquad), w_ell2(len2*nquad), tau_ell2(3,len2*nquad)
@@ -844,6 +851,8 @@ contains
     tmp_vec2 = [(k, k = 1_8, len2nquad, 1_8)]
     len3nquad = len3*nquad
     tmp_vec3 = [(k, k = 1_8, len3nquad, 1_8)]
+    allocate(t_up(198_8*nquad), w_ref(198_8*nquad))
+    allocate(r_up(3,198_8*nquad), rp_up(3,198_8*nquad), Bup(nquad,198_8*nquad))
 
     do ell = 1, sbdnp
       idx_ell_start = (ell-1_8)*nquad + 1_8
@@ -883,6 +892,10 @@ contains
         r_root(2) = yroot(j,ell)
         r_root(3) = zroot(j,ell)
         rfcj = rfc(j,ell)
+        if (LQS_PROF == 1_8) then
+          lqs_rfc_hist(min(rfcj, 8_8)) = lqs_rfc_hist(min(rfcj, 8_8)) + 1_8
+          call cpu_time(lqs_t0)
+        end if
 
         if (rfcj >= 4_8) then
           r_ellL = r_ell;  rpL = rp;  rlL = rl;  rrL = rr
@@ -897,15 +910,35 @@ contains
               r_ellL(2,k) = alpha_fr*(Rfr(2,1)*d1 + Rfr(2,2)*d2 + Rfr(2,3)*d3)
               r_ellL(3,k) = alpha_fr*(Rfr(3,1)*d1 + Rfr(3,2)*d2 + Rfr(3,3)*d3)
             end do
-            xh = matmul(Legmat, r_ellL(1,:))
-            yh = matmul(Legmat, r_ellL(2,:))
-            zh = matmul(Legmat, r_ellL(3,:))
-            tinit = troot(j,ell)
+            rpL = matmul(r_ellL, DglT)
+            tr = troot(j,ell)
             ifconv = 0_8
-            call line_quad_root_refine_r64(xh, yh, zh, nquad, &
-                 0.0_r64, 0.0_r64, 0.0_r64, tinit, tr, ifconv)
+            do it = 1, 8
+              dvecc = tr - tgl
+              kmin  = minloc(abs(dvecc), 1)
+              if (abs(dvecc(kmin)) < 1.0e-14_r64) then
+                rc  = r_ellL(:,kmin)
+                rpc = rpL(:,kmin)
+              else
+                browc = w_bclag/dvecc
+                browc = browc/sum(browc)
+                rc(1)  = sum(r_ellL(1,:)*browc)
+                rc(2)  = sum(r_ellL(2,:)*browc)
+                rc(3)  = sum(r_ellL(3,:)*browc)
+                rpc(1) = sum(rpL(1,:)*browc)
+                rpc(2) = sum(rpL(2,:)*browc)
+                rpc(3) = sum(rpL(3,:)*browc)
+              end if
+              Fc  = rc(1)*rc(1) + rc(2)*rc(2) + rc(3)*rc(3)
+              Fpc = 2.0_r64*(rc(1)*rpc(1) + rc(2)*rpc(2) + rc(3)*rpc(3))
+              dtc = -Fc/Fpc
+              tr  = tr + dtc
+              if (abs(dtc) < 1.0e-15_r64) then
+                ifconv = 1_8
+                exit
+              end if
+            end do
             if (ifconv == 1_8) then
-              rpL  = matmul(r_ellL, DglT)
               rlrL = matmul(r_ellL, bclagmatlr)
               rlL  = rlrL(:,1);  rrL = rlrL(:,2)
               t_rootjr = real(tr, r64)
@@ -931,15 +964,17 @@ contains
           call estimate_nearroot_lengths_r64(t_rootjr, &
                  2.0_r64*sqn_dist/pan_len, 99_8, len, lenl, lenr, FAC, COEF)
           nquad_up = nquad*(len - 1_8)
-          allocate(t_up(nquad_up), w_ref(nquad_up))
+          if (LQS_PROF == 1_8) then
+            lqs_len_hist(min(len, 64_8)) = lqs_len_hist(min(len, 64_8)) + 1_8
+            lqs_nodes_adap = lqs_nodes_adap + nquad_up
+          end if
           call build_nearroot_nodes_r64(t_rootjr, nquad, tgl, wgl, len, lenl, lenr, &
-                                        t_up, w_ref)
-          allocate(r_up(3,nquad_up), rp_up(3,nquad_up))
+                                        t_up(1:nquad_up), w_ref(1:nquad_up))
           do k = 1, nquad_up
-            call bary_row_r64(nquad, tgl, w_bclag, t_up(k), brow)
-            r_up(:,k)  = matmul(r_ellL, brow)
-            rp_up(:,k) = matmul(rpL, brow)
+            call bary_row_r64(nquad, tgl, w_bclag, t_up(k), Bup(:,k))
           end do
+          r_up(:,1:nquad_up)  = matmul(r_ellL, Bup(:,1:nquad_up))
+          rp_up(:,1:nquad_up) = matmul(rpL, Bup(:,1:nquad_up))
           acc = 0.0_r64
           do k = 1, nquad_up
             spk = sqrt(rp_up(1,k)**2 + rp_up(2,k)**2 + rp_up(3,k)**2)
@@ -961,7 +996,6 @@ contains
             acc = acc - (num/den)*(spk*w_ref(k))
           end do
           IalphaAsvestas(j) = IalphaAsvestas(j) + acc
-          deallocate(t_up, w_ref, r_up, rp_up)
         else if (rfcj >= 3_8) then
           rmr03(1,:) = r_ell3(1,:) - r0j(1)
           rmr03(2,:) = r_ell3(2,:) - r0j(2)
@@ -1035,6 +1069,14 @@ contains
           integrand0 = -numerator0/denominator0
           IalphaAsvestas(j) = IalphaAsvestas(j) + sum(integrand0*w_ell)
         end if
+        if (LQS_PROF == 1_8) then
+          call cpu_time(lqs_t1)
+          if (rfcj >= 4_8) then
+            lqs_t_adap = lqs_t_adap + (lqs_t1 - lqs_t0)
+          else
+            lqs_t_unif = lqs_t_unif + (lqs_t1 - lqs_t0)
+          end if
+        end if
       end do
     end do
   end subroutine evaluate_solid_angle_integral_fast_r64
@@ -1053,7 +1095,7 @@ contains
     real(r64),  intent(inout) :: IalphaAsvestas(m)
 
     integer(8), parameter :: sbdnp = 3_8
-    integer(8), parameter :: len1 = 2_8, len2 = 4_8, len3 = 8_8
+    integer(8), parameter :: len1 = 4_8, len2 = 8_8, len3 = 16_8
     integer(8) :: nquad
 
     real(r64), allocatable :: tgl(:), wgl(:), Dgl(:,:), w_bclag(:)
@@ -1152,6 +1194,7 @@ contains
          len3, sxbd3, stangbd3, swbd3, &
          qhat, tgl, wgl, Dgl, w_bclag, bclagmatlr, &
          troot, xroot, yroot, zroot, rfc, IalphaAsvestas, &
+         rho_in=8.0_r64**(8.0_r64/real(nquad, r64)), &
          sxbd_raw=sxbd_in, tx_raw=tx, Rfr=R, alpha_fr=alpha, Legmat=Legmat)
 
   contains
