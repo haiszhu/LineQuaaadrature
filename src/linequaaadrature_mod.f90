@@ -66,6 +66,7 @@ contains
 
   end subroutine gauss_r64
 
+#ifndef BIESOLVER_R64_ONLY
   subroutine gauss_r128(n, tgl, wgl, Dgl)
     integer(8), intent(in)    :: n
     real(r128), intent(inout) :: tgl(n), wgl(n), Dgl(n,n)
@@ -119,6 +120,7 @@ contains
     end do
 
   end subroutine gauss_r128
+#endif
 
   ! ------------------------------------------------------------------
   ! bclaginterpweights
@@ -145,6 +147,7 @@ contains
 
   end subroutine bclaginterpweights_r64
 
+#ifndef BIESOLVER_R64_ONLY
   subroutine bclaginterpweights_r128(n, tgl, w_bclag)
     integer(8), intent(in)    :: n
     real(r128), intent(in)    :: tgl(n)
@@ -193,6 +196,7 @@ contains
     bclagmatlr(:, 2) = bclagmatlr(:, 2) / denomr
 
   end subroutine bclagmatlr_r128
+#endif
 
   ! ------------------------------------------------------------------
   ! legeexps
@@ -234,6 +238,7 @@ contains
 
   end subroutine legeexps_r64
 
+#ifndef BIESOLVER_R64_ONLY
   subroutine legeexps_r128(itype, n, tgl, Legmat, v, wgl)
     integer(8), intent(in)    :: itype, n
     real(r128), intent(inout) :: tgl(n), Legmat(n,n), v(n,n), wgl(n)
@@ -259,6 +264,7 @@ contains
     end do
 
   end subroutine legeexps_r128
+#endif
 
   ! ------------------------------------------------------------------
   ! legepols_r64 / legepols_r128
@@ -286,6 +292,7 @@ contains
 
   end subroutine legepols_r64
 
+#ifndef BIESOLVER_R64_ONLY
   subroutine legepols_r128(x, n, pols)
     real(r128), intent(in)  :: x
     integer(8), intent(in)  :: n
@@ -306,5 +313,6 @@ contains
     end do
 
   end subroutine legepols_r128
+#endif
 
 end module linequaaadrature_mod

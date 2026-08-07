@@ -1,9 +1,19 @@
+#ifdef BIESOLVER_WASM_SCALAR_ONLY
+#define cpu_time lqs_scalar_noop_cpu_time
+#endif
 module solidangle_mod
   use linequaaadrature_mod
-  use iso_c_binding, only: c_long_long
+  use iso_c_binding, only: c_long_long, c_funloc, c_funptr, c_f_procpointer
+#ifndef BIESOLVER_R64_ONLY
+  use iso_c_binding, only: c_float128
+#endif
   implicit none
 
+#ifdef BIESOLVER_WASM_SCALAR_ONLY
+  integer(8), parameter :: LQS_PROF = 0_8
+#else
   integer(8), save :: LQS_PROF = 0_8
+#endif
   integer(8), save :: lqs_rfc_hist(0:8) = 0_8
   integer(8), save :: lqs_len_hist(0:64) = 0_8
   integer(8), save :: lqs_nodes_adap = 0_8
@@ -11,6 +21,13 @@ module solidangle_mod
   real(r64),  save :: lqs_t_unif = 0.0_r64
 
 contains
+
+#ifdef BIESOLVER_WASM_SCALAR_ONLY
+  subroutine lqs_scalar_noop_cpu_time(value)
+    real(r64), intent(out) :: value
+    value = 0.0_r64
+  end subroutine lqs_scalar_noop_cpu_time
+#endif
 
   ! ------------------------------------------------------------------
   ! evaluate_solid_angle_integral_r64
@@ -179,6 +196,7 @@ contains
 
   end subroutine evaluate_solid_angle_integral_r64
 
+#ifndef BIESOLVER_R64_ONLY
   subroutine evaluate_solid_angle_integral_r128(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, use_nearroot, IalphaAsvestas)
     use koorn_geom_mod, only: circumcircle_transform_3d_r128
     use lq_kernel_mod,  only: line_kernel_eval_r128, line_quad_compress_r128, &
@@ -421,6 +439,7 @@ contains
     deallocate(root_re, root_im, root_ok, funvals_ell, sxbdw_ell)
 
   end subroutine evaluate_line_integral_r128
+#endif
 
 
     ! ------------------------------------------------------------------
@@ -718,9 +737,10 @@ contains
     end do
   end subroutine moments_kernel_r64
 
-  subroutine invr_kernel_r128(r_s, tau_s, r0j, kdata, val)
-    real(r128), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata(3)
-    real(r128), intent(inout) :: val
+#ifndef BIESOLVER_R64_ONLY
+  subroutine invr_kernel_r128(r_s, tau_s, r0j, kdata, val) bind(C)
+    real(c_float128), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata(3)
+    real(c_float128), intent(inout) :: val
 
     real(r128) :: dx, dy, dz, r2, rinv
     integer(8) :: power
@@ -766,6 +786,70 @@ contains
 
   end subroutine asvestas_kernel_r128
 
+  subroutine moments_kernel_r128(r_s, tau_s, r0j, kdata, dim, val) bind(C)
+    real(c_float128), intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata(3)
+    integer(c_long_long), value     :: dim
+    real(c_float128), intent(inout) :: val(dim)
+
+    integer(8) :: order, flag, k
+    real(r128) :: r0norm, r0norm_inv
+    real(r128) :: r0dotr, rnorm, rnorm_inv, rnorm2_inv
+    real(r128) :: r0dotr_over_rnorm2, r0norm2_over_rnorm2
+    real(r128) :: r0mr_vec(3), r0mr, r0mr_inv, r0mr_over_rnorm2
+    real(r128) :: r0dotr0mr_over_r0mr, rdotr0mr_over_r0mr
+    real(r128) :: denominator1, denominator2, LMNcommon
+    real(r128) :: LMcommon, r0normplusrnorm
+
+    order = dim/2_8 - 1_8
+    flag = nint(kdata(2), 8)
+    val = 0.0_r128
+
+    r0dotr = r0j(1)*r_s(1) + r0j(2)*r_s(2) + r0j(3)*r_s(3)
+    rnorm = sqrt(r_s(1)**2 + r_s(2)**2 + r_s(3)**2)
+    r0norm = sqrt(r0j(1)**2 + r0j(2)**2 + r0j(3)**2)
+    rnorm_inv = 1.0_r128/rnorm
+    rnorm2_inv = rnorm_inv**2
+    r0norm_inv = 1.0_r128/r0norm
+    r0dotr_over_rnorm2 = r0dotr*rnorm2_inv
+    r0norm2_over_rnorm2 = r0norm**2*rnorm2_inv
+    r0normplusrnorm = r0norm+rnorm
+
+    r0mr_vec = r0j - r_s
+    r0mr = sqrt(r0mr_vec(1)**2 + r0mr_vec(2)**2 + r0mr_vec(3)**2)
+    r0mr_over_rnorm2 = r0mr*rnorm2_inv
+    r0mr_inv = 1.0_r128/r0mr
+
+    r0dotr0mr_over_r0mr = (r0j(1)*r0mr_vec(1) + r0j(2)*r0mr_vec(2) + &
+                           r0j(3)*r0mr_vec(3))*r0mr_inv
+    denominator1 = r0norm + r0dotr0mr_over_r0mr
+    rdotr0mr_over_r0mr = (r_s(1)*r0mr_vec(1) + r_s(2)*r0mr_vec(2) + &
+                          r_s(3)*r0mr_vec(3))*r0mr_inv
+    denominator2 = rnorm + rdotr0mr_over_r0mr
+    LMNcommon = r0normplusrnorm/(denominator1+denominator2)
+
+    val(1) = log((r0normplusrnorm+r0mr)*LMNcommon*r0mr_inv)*rnorm_inv
+    if (order >= 1_8) then
+      val(2) = val(1)*r0dotr_over_rnorm2 + (r0mr-r0norm)*rnorm2_inv
+    end if
+    do k=2_8,order
+      val(k+1_8) = real(2_8*k-1_8,r128)/real(k,r128)*r0dotr_over_rnorm2*val(k) - &
+                   real(k-1_8,r128)/real(k,r128)*r0norm2_over_rnorm2*val(k-1_8) + &
+                   1.0_r128/real(k,r128)*r0mr_over_rnorm2
+    end do
+
+    LMcommon = 1.0_r128/(r0norm*rnorm+r0dotr)
+    val(order+2_8) = LMNcommon*LMcommon*(((r0normplusrnorm)*r0mr_inv+rnorm*r0norm_inv)* &
+                       r0mr_inv-r0norm_inv)
+    if (order >= 1_8) then
+      val(order+3_8) = r0norm*val(order+2_8)/(r0norm+r0mr)
+    end if
+    do k=2_8,order
+      val(order+2_8+k) = (r0dotr*val(order+1_8+k) + real(k-1_8,r128)*val(k-1_8) - &
+                          r0mr_inv)*rnorm2_inv
+    end do
+  end subroutine moments_kernel_r128
+#endif
+
   subroutine evaluate_solid_angle_integral_fast_r64(m, r0, nbd, sbdnp, nquad, &
                                            sxbd, stangbd, sspbd, &
                                            len1, sxbd1, stangbd1, swbd1, &
@@ -790,9 +874,9 @@ contains
     real(r64),    intent(in)    :: swbd1(len1*nbd), swbd2(len2*nbd), swbd3(len3*nbd)
     real(r64),    intent(in)    :: tgl(nquad), wgl(nquad), w_bclag(nquad)
     real(r64),    intent(in)    :: Dgl(nquad,nquad), bclagmatlr(nquad,2)
-    complex(r64), intent(in)    :: troot(m,nbd)
-    real(r64),    intent(in)    :: xroot(m,nbd), yroot(m,nbd), zroot(m,nbd)
-    integer(8),   intent(inout) :: rfc(m,nbd)
+    complex(r64), intent(in)    :: troot(m,sbdnp)
+    real(r64),    intent(in)    :: xroot(m,sbdnp), yroot(m,sbdnp), zroot(m,sbdnp)
+    integer(8),   intent(inout) :: rfc(m,sbdnp)
     real(r64),    intent(inout) :: IalphaAsvestas(m)
     real(r64),    intent(in), optional :: rho_in
     real(r64),    intent(in), optional :: sxbd_raw(3,nbd), tx_raw(3,m)
@@ -809,7 +893,7 @@ contains
     real(r64) :: qhatxrmr0hat1(nquad), qhatxrmr0hat2(nquad), qhatxrmr0hat3(nquad)
     real(r64) :: numerator0(nquad), denominator0(nquad), integrand0(nquad)
     real(r64) :: rlr(3,2), rl(3), rr(3), rp(3,nquad), DglT(nquad,nquad)
-    real(r64) :: pan_len, sqn_dist
+    real(r64) :: pan_len, sqn_dist, dvec_min
     integer(8) :: len, lenl, lenr, nquad_up
     real(r64), allocatable :: r_up(:,:), rp_up(:,:), t_up(:), w_ref(:), Bup(:,:)
     real(r64) :: spk, t1, t2, t3, d1, d2, d3, dn, h1, h2, h3
@@ -915,7 +999,14 @@ contains
             ifconv = 0_8
             do it = 1, 8
               dvecc = tr - tgl
-              kmin  = minloc(abs(dvecc), 1)
+              kmin = 1_8
+              dvec_min = abs(dvecc(1))
+              do k = 2, nquad
+                if (abs(dvecc(k)) < dvec_min) then
+                  kmin = k
+                  dvec_min = abs(dvecc(k))
+                end if
+              end do
               if (abs(dvecc(kmin)) < 1.0e-14_r64) then
                 rc  = r_ellL(:,kmin)
                 rpc = rpL(:,kmin)
@@ -1079,6 +1170,7 @@ contains
         end if
       end do
     end do
+    deallocate(t_up, w_ref, r_up, rp_up, Bup)
   end subroutine evaluate_solid_angle_integral_fast_r64
 
 

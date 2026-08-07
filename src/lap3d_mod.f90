@@ -14,7 +14,10 @@ module lap3d_mod
   implicit none
   private
   public :: lap3ddlpmat_r64, lap3dslpmat_r64, lap3dsdlpmat_r64, &
-            lap3ddlp_direct_r64, lap3ddlp_direct_r128, lap3ddlpmat_r128
+            lap3ddlp_direct_r64
+#ifndef BIESOLVER_R64_ONLY
+  public :: lap3ddlp_direct_r128, lap3ddlpmat_r128
+#endif
 
 contains
 
@@ -185,6 +188,7 @@ contains
   ! lap3ddlp_direct_r128
   ! Same as lap3ddlp_direct_r64 at real(16) precision.
   ! ------------------------------------------------------------------
+#ifndef BIESOLVER_R64_ONLY
   subroutine lap3ddlp_direct_r128(m, r0, n, r, rn, w, sigma, u)
     integer(8),  intent(in)  :: m, n
     real(r128),  intent(in)  :: r0(3,m), r(3,n), rn(3,n), w(n), sigma(n)
@@ -218,11 +222,13 @@ contains
 !$omp end parallel do
 
   end subroutine lap3ddlp_direct_r128
+#endif
 
   ! ------------------------------------------------------------------
   ! lap3ddlpmat_r128
   ! Dense DLP matrix at real(16) precision.
   ! ------------------------------------------------------------------
+#ifndef BIESOLVER_R64_ONLY
   subroutine lap3ddlpmat_r128(m, r0, n, r, rn, w, A)
     integer(8), intent(in)  :: m, n
     real(r128), intent(in)  :: r0(3,m), r(3,n), rn(3,n), w(n)
@@ -252,5 +258,6 @@ contains
     end do
 
   end subroutine lap3ddlpmat_r128
+#endif
 
 end module lap3d_mod

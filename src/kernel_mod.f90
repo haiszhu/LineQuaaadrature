@@ -3,9 +3,18 @@
 ! fun is type(c_funptr),value — declared before kdata (matches dummy-list order).
 ! Caller constructs c_funptr from integer(8) handle before calling.
 
+#ifdef BIESOLVER_WASM_SCALAR_ONLY
+#define system_clock lq_scalar_noop_system_clock
+#endif
 module lq_kernel_mod
-  use iso_c_binding, only: c_funptr, c_f_procpointer, c_double, c_long_long
-  use linequaaadrature_mod, only: gauss_r64, gauss_r128, bclaginterpweights_r64, bclaginterpweights_r128
+  use iso_c_binding, only: c_funptr, c_funloc, c_f_procpointer, c_double, c_long_long
+#ifndef BIESOLVER_R64_ONLY
+  use iso_c_binding, only: c_float128
+#endif
+  use linequaaadrature_mod, only: gauss_r64, bclaginterpweights_r64
+#ifndef BIESOLVER_R64_ONLY
+  use linequaaadrature_mod, only: gauss_r128, bclaginterpweights_r128
+#endif
   implicit none
 
   integer, parameter :: r64  = 8
@@ -97,7 +106,11 @@ module lq_kernel_mod
     2.5725814104946672_r64, -2.5999150879811728_r64, 2.6269650248709331_r64, &
     -2.6537398607013483_r64 ]
 
+#ifdef BIESOLVER_WASM_SCALAR_ONLY
+  logical, parameter :: lq_profile_enabled_r64 = .false.
+#else
   logical :: lq_profile_enabled_r64 = .false.
+#endif
   integer(8) :: lq_profile_kernel_eval_calls_r64 = 0_8
   integer(8) :: lq_profile_compress_calls_r64 = 0_8
   integer(8) :: lq_profile_compress_targets_r64 = 0_8
@@ -135,6 +148,7 @@ module lq_kernel_mod
     end subroutine kernel_vec_iface_r64
   end interface
 
+#ifndef BIESOLVER_R64_ONLY
   abstract interface
     subroutine kernel_iface_r128(r_s, tau_s, r0j, kdata3, val)
       integer, parameter :: rr = 16
@@ -143,7 +157,55 @@ module lq_kernel_mod
     end subroutine kernel_iface_r128
   end interface
 
+  abstract interface
+    subroutine kernel_vec_iface_r128(r_s, tau_s, r0j, kdata3, dim, val) bind(C)
+      import c_float128, c_long_long
+      real(c_float128),     intent(in)    :: r_s(3), tau_s(3), r0j(3), kdata3(3)
+      integer(c_long_long), value         :: dim
+      real(c_float128),     intent(inout) :: val(dim)
+    end subroutine kernel_vec_iface_r128
+  end interface
+#endif
 contains
+
+#ifdef BIESOLVER_C_BACKEND_ROW_MAJOR
+  pure real(r64) function coeff_i1_runtime_r64(i) result(c)
+    integer(8), intent(in) :: i
+    integer(8) :: k
+    c = 0.5_r64
+    do k = 2, i
+      c = -c*real(2*k-3, r64)/real(2*k, r64)
+    end do
+  end function coeff_i1_runtime_r64
+
+  pure real(r64) function coeff_i3_runtime_r64(i) result(c)
+    integer(8), intent(in) :: i
+    integer(8) :: k
+    c = 0.375_r64
+    do k = 2, i
+      c = -c*real(2*k+1, r64)/real(2*k+2, r64)
+    end do
+  end function coeff_i3_runtime_r64
+
+  pure real(r64) function coeff_i5_runtime_r64(i) result(c)
+    integer(8), intent(in) :: i
+    integer(8) :: k
+    c = 0.41666666666666667_r64
+    do k = 2, i
+      c = -c*(real(k+1, r64)*real(2*k+3, r64))/ &
+             (real(2*k, r64)*real(k+2, r64))
+    end do
+  end function coeff_i5_runtime_r64
+#endif
+
+#ifdef BIESOLVER_WASM_SCALAR_ONLY
+  subroutine lq_scalar_noop_system_clock(count, count_rate)
+    integer, intent(out) :: count
+    integer, intent(out), optional :: count_rate
+    count = 0
+    if (present(count_rate)) count_rate = 1
+  end subroutine lq_scalar_noop_system_clock
+#endif
 
   subroutine lq_profile_reset_r64()
     lq_profile_kernel_eval_calls_r64 = 0_8
@@ -1296,6 +1358,7 @@ contains
   ! argument is a procedure(kernel_iface_r128) dummy. Same INVR
   ! local-coord shift, same ASVESTAS / MOMENTS_MN dispatch.
   ! ----------------------------------------------------------------
+#ifndef BIESOLVER_R64_ONLY
   subroutine line_quad_BrF_r128(nquad, n_up, ncol, &
                                 r_ell, rp_ell, &
                                 tgl, wgl, w_bclag, &
@@ -1530,6 +1593,7 @@ contains
       Br(:,i) = w_up128(i) * wgl_inv128 * row128
     end do
   end subroutine line_quad_BrF_r128
+#endif
 
   ! ----------------------------------------------------------------
   ! line_quad_compress_nearroot_r64
@@ -2134,6 +2198,7 @@ contains
     end do
   end subroutine build_target_nearroot_weights_r64
 
+#ifndef BIESOLVER_R64_ONLY
   subroutine build_target_nearroot_weights_r128(nquad, tgl, wgl, dgl, w_bclag, &
                                                 legmat, &
                                                 xj, yj, zj, spj, stauj, &
@@ -2797,6 +2862,7 @@ contains
     deallocate(tgl2, wgl2, Dgl2)
 
   end subroutine line_quad_compress_nearroot_r128
+#endif
 
 
   real(r64) function legendre_eval_r64(n, chat, t) result(v)
@@ -2901,7 +2967,11 @@ contains
               bx2p = 1.0_r64
               do i = 1, Ns
                 bx2p = bx2p*bx2
+#ifdef BIESOLVER_C_BACKEND_ROW_MAJOR
+                f = f + coeff_i1_runtime_r64(i)*bx2p
+#else
                 f = f + COEFF_I1(i)*bx2p
+#endif
               end do
               arg1 = (1.0_r64 - abs(zr))*f
               arg2 = 1.0_r64 + abs(zr) + sqrt((1.0_r64+abs(zr))*(1.0_r64+abs(zr)) + zi*zi)
@@ -2942,12 +3012,20 @@ contains
               bx2 = zi*zi/(x1*x1);  bx2p = 1.0_r64
               do i = 1, Ns
                 bx2p = bx2p*bx2
+#ifdef BIESOLVER_C_BACKEND_ROW_MAJOR
+                f1 = f1 + coeff_i3_runtime_r64(i)*bx2p
+#else
                 f1 = f1 + COEFF_I3(i)*bx2p
+#endif
               end do
               bx2 = zi*zi/(x2*x2);  bx2p = 1.0_r64
               do i = 1, Ns
                 bx2p = bx2p*bx2
+#ifdef BIESOLVER_C_BACKEND_ROW_MAJOR
+                f2 = f2 + coeff_i3_runtime_r64(i)*bx2p
+#else
                 f2 = f2 + COEFF_I3(i)*bx2p
+#endif
               end do
               Fs1 = abs(x1)/(x1*x1*x1)*(-0.5_r64 + f1)
               Fs2 = abs(x2)/(x2*x2*x2)*(-0.5_r64 + f2)
@@ -2978,12 +3056,20 @@ contains
               bx2 = zi*zi/(x1*x1);  bx2p = 1.0_r64
               do i = 1, Ns
                 bx2p = bx2p*bx2
+#ifdef BIESOLVER_C_BACKEND_ROW_MAJOR
+                f1 = f1 + coeff_i5_runtime_r64(i)*bx2p
+#else
                 f1 = f1 + COEFF_I5(i)*bx2p
+#endif
               end do
               bx2 = zi*zi/(x2*x2);  bx2p = 1.0_r64
               do i = 1, Ns
                 bx2p = bx2p*bx2
+#ifdef BIESOLVER_C_BACKEND_ROW_MAJOR
+                f2 = f2 + coeff_i5_runtime_r64(i)*bx2p
+#else
                 f2 = f2 + COEFF_I5(i)*bx2p
+#endif
               end do
               Fs1 = 1.0_r64/(x1*x1*x1*abs(x1))*(-0.25_r64 + f1)
               Fs2 = 1.0_r64/(x2*x2*x2*abs(x2))*(-0.25_r64 + f2)

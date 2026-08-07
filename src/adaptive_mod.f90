@@ -5,8 +5,10 @@ module lq_adaptive_mod
 
   public :: line_quad_root_initial_guess_r64
   public :: line_quad_root_refine_r64
+#ifndef BIESOLVER_R64_ONLY
   public :: line_quad_root_initial_guess_r128
   public :: line_quad_root_refine_r128
+#endif
 
 contains
 
@@ -53,6 +55,7 @@ contains
   end subroutine line_quad_root_initial_guess_r64
 
 
+#ifndef BIESOLVER_R64_ONLY
   subroutine line_quad_root_initial_guess_r128(tj, xj, yj, zj, n, x0, y0, z0, tinit)
     integer(8),  intent(in)  :: n
     real(r128),  intent(in)  :: tj(n), xj(n), yj(n), zj(n), x0, y0, z0
@@ -86,6 +89,7 @@ contains
     b = sqrt(max(0.0_r128, rnormsq - rdotp*rdotp*pnorm2i)) * (tj(imin1) - tj(imin2)) * pnormi
     tinit = cmplx(tj(imin1) + a, b, kind=16)
   end subroutine line_quad_root_initial_guess_r128
+#endif
 
 
   ! Copy/adapt the body of lqa_root_refine_r64 here,
@@ -158,6 +162,7 @@ contains
       if (abs(dt) < tol) then
         ifconv = 1_8
         troot  = t
+#ifndef BIESOLVER_R64_ONLY
         if (use_r128_tail) then
           block
             real(r128) :: xhat128(n), yhat128(n), zhat128(n)
@@ -192,6 +197,7 @@ contains
             troot = cmplx(real(t128, r64), real(aimag(t128), r64), kind=8)
           end block
         end if
+#endif
         return
       end if
     end do
@@ -233,6 +239,7 @@ contains
       if (abs(dt) < tol) then
         ifconv = 1_8
         troot  = t
+#ifndef BIESOLVER_R64_ONLY
         if (use_r128_tail) then
           block
             real(r128) :: xhat128(n), yhat128(n), zhat128(n)
@@ -267,11 +274,13 @@ contains
             troot = cmplx(real(t128, r64), real(aimag(t128), r64), kind=8)
           end block
         end if
+#endif
         return
       end if
     end do
   end subroutine line_quad_root_refine_r64
 
+#ifndef BIESOLVER_R64_ONLY
   subroutine line_quad_root_refine_r128(xhat, yhat, zhat, n, x0, y0, z0, tinit, troot, ifconv)
     integer(8),  intent(in)  :: n
     real(r128),  intent(in)  :: xhat(n), yhat(n), zhat(n), x0, y0, z0
@@ -329,6 +338,7 @@ contains
       F = cdx*cdx + cdy*cdy + cdz*cdz
     end do
   end subroutine line_quad_root_refine_r128
+#endif
 
   subroutine line_quad_legendre_cx8(n, x, P)
     ! Complex Legendre polynomial values P(0)..P(n) at complex x. (n+1 values)
@@ -359,6 +369,7 @@ contains
     end do
   end subroutine line_quad_legendrederiv_cx8
 
+#ifndef BIESOLVER_R64_ONLY
   subroutine line_quad_legendre_cx16(n, x, P)
     ! Complex Legendre polynomial values P(0)..P(n) at complex x. (n+1 values)
     integer(8),  intent(in)  :: n
@@ -387,4 +398,5 @@ contains
       D(l+2) = ((2*l+1)*(P(l+1) + x*D(l+1)) - l*D(l)) / real(l+1, r128)
     end do
   end subroutine line_quad_legendrederiv_cx16
+#endif
 end module lq_adaptive_mod
