@@ -401,6 +401,35 @@ contains
 
   end subroutine bary_row_r64
 
+  subroutine bary_rows_r64(nquad, tgl, w_bclag, nxi, xi, rows)
+    integer(8), intent(in)  :: nquad, nxi
+    real(r64),  intent(in)  :: tgl(nquad), w_bclag(nquad), xi(nxi)
+    real(r64),  intent(out) :: rows(nquad,nxi)
+
+    integer(8) :: j, k
+    real(r64)  :: eps_hit, denom
+    logical    :: hit
+
+    eps_hit = 100.0_r64 * epsilon(1.0_r64)
+    do j = 1, nxi
+      rows(:,j) = 0.0_r64
+      hit = .false.
+      do k = 1, nquad
+        if (abs(xi(j) - tgl(k)) <= eps_hit * max(1.0_r64, abs(tgl(k)))) then
+          rows(k,j) = 1.0_r64
+          hit = .true.
+          exit
+        end if
+      end do
+      if (hit) cycle
+      do k = 1, nquad
+        rows(k,j) = w_bclag(k) / (xi(j) - tgl(k))
+      end do
+      denom = sum(rows(:,j))
+      rows(:,j) = rows(:,j) / denom
+    end do
+  end subroutine bary_rows_r64
+
   subroutine build_nearroot_panel_ends_r64(t_root, len, lenl, lenr, pan_t_end)
     real(r64),  intent(in)  :: t_root
     integer(8), intent(in)  :: len, lenl, lenr

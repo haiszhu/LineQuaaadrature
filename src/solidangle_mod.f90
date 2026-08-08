@@ -860,7 +860,7 @@ contains
                                            IalphaAsvestas, rho_in, &
                                            sxbd_raw, tx_raw, Rfr, alpha_fr, Legmat)
     use lq_kernel_mod,   only: estimate_nearroot_lengths_r64, &
-                               build_nearroot_nodes_r64, bary_row_r64, &
+                               build_nearroot_nodes_r64, bary_row_r64, bary_rows_r64, &
                                update_refinement_codes_r64
     use lq_adaptive_mod, only: line_quad_root_initial_guess_r64, &
                                line_quad_root_refine_r64
@@ -889,39 +889,29 @@ contains
     real(r64) :: x_ell(nquad), y_ell(nquad), z_ell(nquad), w_ell(nquad)
     real(r64) :: r0j(3), r_root(3), t_rootjr
     integer(8) :: rfcj
-    real(r64) :: rmr0(3,nquad), rmr0norm(nquad), rmr0hat(3,nquad)
-    real(r64) :: qhatxrmr0hat1(nquad), qhatxrmr0hat2(nquad), qhatxrmr0hat3(nquad)
-    real(r64) :: numerator0(nquad), denominator0(nquad), integrand0(nquad)
+    real(r64) :: wc0(3,nquad)
     real(r64) :: rlr(3,2), rl(3), rr(3), rp(3,nquad), DglT(nquad,nquad)
     real(r64) :: pan_len, sqn_dist, dvec_min
     integer(8) :: len, lenl, lenr, nquad_up
-    real(r64), allocatable :: r_up(:,:), rp_up(:,:), t_up(:), w_ref(:), Bup(:,:)
-    real(r64) :: spk, t1, t2, t3, d1, d2, d3, dn, h1, h2, h3
+    real(r64), allocatable :: rrp_up(:,:), t_up(:), w_ref(:), Bup(:,:)
+    real(r64) :: rrpL(6,nquad)
+    real(r64) :: d1, d2, d3, dn, h1, h2, h3
     real(r64) :: c1, c2, c3, num, den, acc
     real(r64) :: brow(nquad)
     real(r64) :: r_ellL(3,nquad), rpL(3,nquad), rlL(3), rrL(3), rlrL(3,2)
     real(r64) :: lqs_t0, lqs_t1
     complex(r64) :: browc(nquad), dvecc(nquad), rc(3), rpc(3), Fc, Fpc, dtc, tr
     integer(8) :: ifconv, it, kmin
-    logical    :: shifted
+    logical    :: shifted, wc0_ready, wc1_ready, wc2_ready, wc3_ready
     real(r64) :: r_ell1(3,len1*nquad), w_ell1(len1*nquad), tau_ell1(3,len1*nquad)
     real(r64) :: r_ell2(3,len2*nquad), w_ell2(len2*nquad), tau_ell2(3,len2*nquad)
     real(r64) :: r_ell3(3,len3*nquad), w_ell3(len3*nquad), tau_ell3(3,len3*nquad)
     integer(8) :: tmp_vec1(len1*nquad), idx_ell1(len1*nquad), len1nquad
     integer(8) :: tmp_vec2(len2*nquad), idx_ell2(len2*nquad), len2nquad
     integer(8) :: tmp_vec3(len3*nquad), idx_ell3(len3*nquad), len3nquad
-    real(r64) :: rmr01(3,len1*nquad), rmr0norm1(len1*nquad), rmr0hat1(3,len1*nquad)
-    real(r64) :: qhatxrmr0hat11(len1*nquad), qhatxrmr0hat21(len1*nquad)
-    real(r64) :: qhatxrmr0hat31(len1*nquad)
-    real(r64) :: numerator01(len1*nquad), denominator01(len1*nquad), integrand01(len1*nquad)
-    real(r64) :: rmr02(3,len2*nquad), rmr0norm2(len2*nquad), rmr0hat2(3,len2*nquad)
-    real(r64) :: qhatxrmr0hat12(len2*nquad), qhatxrmr0hat22(len2*nquad)
-    real(r64) :: qhatxrmr0hat32(len2*nquad)
-    real(r64) :: numerator02(len2*nquad), denominator02(len2*nquad), integrand02(len2*nquad)
-    real(r64) :: rmr03(3,len3*nquad), rmr0norm3(len3*nquad), rmr0hat3(3,len3*nquad)
-    real(r64) :: qhatxrmr0hat13(len3*nquad), qhatxrmr0hat23(len3*nquad)
-    real(r64) :: qhatxrmr0hat33(len3*nquad)
-    real(r64) :: numerator03(len3*nquad), denominator03(len3*nquad), integrand03(len3*nquad)
+    real(r64) :: wc1(3,len1*nquad)
+    real(r64) :: wc2(3,len2*nquad)
+    real(r64) :: wc3(3,len3*nquad)
 
     DglT = transpose(Dgl)
     if (present(rho_in)) then
@@ -936,7 +926,7 @@ contains
     len3nquad = len3*nquad
     tmp_vec3 = [(k, k = 1_8, len3nquad, 1_8)]
     allocate(t_up(198_8*nquad), w_ref(198_8*nquad))
-    allocate(r_up(3,198_8*nquad), rp_up(3,198_8*nquad), Bup(nquad,198_8*nquad))
+    allocate(rrp_up(6,198_8*nquad), Bup(nquad,198_8*nquad))
 
     do ell = 1, sbdnp
       idx_ell_start = (ell-1_8)*nquad + 1_8
@@ -968,6 +958,10 @@ contains
       rl  = rlr(:,1)
       rr  = rlr(:,2)
       pan_len = sum(w_ell)
+      wc0_ready = .false.
+      wc1_ready = .false.
+      wc2_ready = .false.
+      wc3_ready = .false.
 
       do j = 1, m
         r0j = r0(:, j)
@@ -1061,20 +1055,16 @@ contains
           end if
           call build_nearroot_nodes_r64(t_rootjr, nquad, tgl, wgl, len, lenl, lenr, &
                                         t_up(1:nquad_up), w_ref(1:nquad_up))
-          do k = 1, nquad_up
-            call bary_row_r64(nquad, tgl, w_bclag, t_up(k), Bup(:,k))
-          end do
-          r_up(:,1:nquad_up)  = matmul(r_ellL, Bup(:,1:nquad_up))
-          rp_up(:,1:nquad_up) = matmul(rpL, Bup(:,1:nquad_up))
+          call bary_rows_r64(nquad, tgl, w_bclag, nquad_up, &
+                             t_up(1:nquad_up), Bup(:,1:nquad_up))
+          rrpL(1:3,:) = r_ellL
+          rrpL(4:6,:) = rpL
+          rrp_up(:,1:nquad_up) = matmul(rrpL, Bup(:,1:nquad_up))
           acc = 0.0_r64
           do k = 1, nquad_up
-            spk = sqrt(rp_up(1,k)**2 + rp_up(2,k)**2 + rp_up(3,k)**2)
-            t1  = rp_up(1,k)/spk
-            t2  = rp_up(2,k)/spk
-            t3  = rp_up(3,k)/spk
-            d1  = r_up(1,k) - r0j(1)
-            d2  = r_up(2,k) - r0j(2)
-            d3  = r_up(3,k) - r0j(3)
+            d1  = rrp_up(1,k) - r0j(1)
+            d2  = rrp_up(2,k) - r0j(2)
+            d3  = rrp_up(3,k) - r0j(3)
             dn  = sqrt(d1*d1 + d2*d2 + d3*d3)
             h1  = d1/dn
             h2  = d2/dn
@@ -1082,83 +1072,95 @@ contains
             c1  = qhat(2)*h3 - qhat(3)*h2
             c2  = qhat(3)*h1 - qhat(1)*h3
             c3  = qhat(1)*h2 - qhat(2)*h1
-            num = t1*c1 + t2*c2 + t3*c3
+            num = rrp_up(4,k)*c1 + rrp_up(5,k)*c2 + rrp_up(6,k)*c3
             den = dn*(1.0_r64 - (qhat(1)*h1 + qhat(2)*h2 + qhat(3)*h3))
-            acc = acc - (num/den)*(spk*w_ref(k))
+            acc = acc - (num/den)*w_ref(k)
           end do
           IalphaAsvestas(j) = IalphaAsvestas(j) + acc
         else if (rfcj >= 3_8) then
-          rmr03(1,:) = r_ell3(1,:) - r0j(1)
-          rmr03(2,:) = r_ell3(2,:) - r0j(2)
-          rmr03(3,:) = r_ell3(3,:) - r0j(3)
-          rmr0norm3 = sqrt(rmr03(1,:)**2 + rmr03(2,:)**2 + rmr03(3,:)**2)
-          rmr0hat3(1,:) = rmr03(1,:)/rmr0norm3
-          rmr0hat3(2,:) = rmr03(2,:)/rmr0norm3
-          rmr0hat3(3,:) = rmr03(3,:)/rmr0norm3
-          qhatxrmr0hat13 = qhat(2)*rmr0hat3(3,:) - qhat(3)*rmr0hat3(2,:)
-          qhatxrmr0hat23 = qhat(3)*rmr0hat3(1,:) - qhat(1)*rmr0hat3(3,:)
-          qhatxrmr0hat33 = qhat(1)*rmr0hat3(2,:) - qhat(2)*rmr0hat3(1,:)
-          numerator03 = tau_ell3(1,:)*qhatxrmr0hat13 &
-                      + tau_ell3(2,:)*qhatxrmr0hat23 &
-                      + tau_ell3(3,:)*qhatxrmr0hat33
-          denominator03 = rmr0norm3*(1.0_r64 - (qhat(1)*rmr0hat3(1,:) &
-                        + qhat(2)*rmr0hat3(2,:) + qhat(3)*rmr0hat3(3,:)))
-          integrand03 = -numerator03/denominator03
-          IalphaAsvestas(j) = IalphaAsvestas(j) + sum(integrand03*w_ell3)
+          if (.not. wc3_ready) then
+            wc3(1,:) = w_ell3*(tau_ell3(2,:)*qhat(3) - tau_ell3(3,:)*qhat(2))
+            wc3(2,:) = w_ell3*(tau_ell3(3,:)*qhat(1) - tau_ell3(1,:)*qhat(3))
+            wc3(3,:) = w_ell3*(tau_ell3(1,:)*qhat(2) - tau_ell3(2,:)*qhat(1))
+            wc3_ready = .true.
+          end if
+          acc = 0.0_r64
+          do k = 1, len3nquad
+            d1 = r_ell3(1,k) - r0j(1)
+            d2 = r_ell3(2,k) - r0j(2)
+            d3 = r_ell3(3,k) - r0j(3)
+            dn = sqrt(d1*d1 + d2*d2 + d3*d3)
+            h1 = d1/dn
+            h2 = d2/dn
+            h3 = d3/dn
+            den = dn*(1.0_r64 - (qhat(1)*h1 + qhat(2)*h2 + qhat(3)*h3))
+            num = h1*wc3(1,k) + h2*wc3(2,k) + h3*wc3(3,k)
+            acc = acc - num/den
+          end do
+          IalphaAsvestas(j) = IalphaAsvestas(j) + acc
         else if (rfcj >= 2_8) then
-          rmr02(1,:) = r_ell2(1,:) - r0j(1)
-          rmr02(2,:) = r_ell2(2,:) - r0j(2)
-          rmr02(3,:) = r_ell2(3,:) - r0j(3)
-          rmr0norm2 = sqrt(rmr02(1,:)**2 + rmr02(2,:)**2 + rmr02(3,:)**2)
-          rmr0hat2(1,:) = rmr02(1,:)/rmr0norm2
-          rmr0hat2(2,:) = rmr02(2,:)/rmr0norm2
-          rmr0hat2(3,:) = rmr02(3,:)/rmr0norm2
-          qhatxrmr0hat12 = qhat(2)*rmr0hat2(3,:) - qhat(3)*rmr0hat2(2,:)
-          qhatxrmr0hat22 = qhat(3)*rmr0hat2(1,:) - qhat(1)*rmr0hat2(3,:)
-          qhatxrmr0hat32 = qhat(1)*rmr0hat2(2,:) - qhat(2)*rmr0hat2(1,:)
-          numerator02 = tau_ell2(1,:)*qhatxrmr0hat12 &
-                      + tau_ell2(2,:)*qhatxrmr0hat22 &
-                      + tau_ell2(3,:)*qhatxrmr0hat32
-          denominator02 = rmr0norm2*(1.0_r64 - (qhat(1)*rmr0hat2(1,:) &
-                        + qhat(2)*rmr0hat2(2,:) + qhat(3)*rmr0hat2(3,:)))
-          integrand02 = -numerator02/denominator02
-          IalphaAsvestas(j) = IalphaAsvestas(j) + sum(integrand02*w_ell2)
+          if (.not. wc2_ready) then
+            wc2(1,:) = w_ell2*(tau_ell2(2,:)*qhat(3) - tau_ell2(3,:)*qhat(2))
+            wc2(2,:) = w_ell2*(tau_ell2(3,:)*qhat(1) - tau_ell2(1,:)*qhat(3))
+            wc2(3,:) = w_ell2*(tau_ell2(1,:)*qhat(2) - tau_ell2(2,:)*qhat(1))
+            wc2_ready = .true.
+          end if
+          acc = 0.0_r64
+          do k = 1, len2nquad
+            d1 = r_ell2(1,k) - r0j(1)
+            d2 = r_ell2(2,k) - r0j(2)
+            d3 = r_ell2(3,k) - r0j(3)
+            dn = sqrt(d1*d1 + d2*d2 + d3*d3)
+            h1 = d1/dn
+            h2 = d2/dn
+            h3 = d3/dn
+            den = dn*(1.0_r64 - (qhat(1)*h1 + qhat(2)*h2 + qhat(3)*h3))
+            num = h1*wc2(1,k) + h2*wc2(2,k) + h3*wc2(3,k)
+            acc = acc - num/den
+          end do
+          IalphaAsvestas(j) = IalphaAsvestas(j) + acc
         else if (rfcj >= 1_8) then
-          rmr01(1,:) = r_ell1(1,:) - r0j(1)
-          rmr01(2,:) = r_ell1(2,:) - r0j(2)
-          rmr01(3,:) = r_ell1(3,:) - r0j(3)
-          rmr0norm1 = sqrt(rmr01(1,:)**2 + rmr01(2,:)**2 + rmr01(3,:)**2)
-          rmr0hat1(1,:) = rmr01(1,:)/rmr0norm1
-          rmr0hat1(2,:) = rmr01(2,:)/rmr0norm1
-          rmr0hat1(3,:) = rmr01(3,:)/rmr0norm1
-          qhatxrmr0hat11 = qhat(2)*rmr0hat1(3,:) - qhat(3)*rmr0hat1(2,:)
-          qhatxrmr0hat21 = qhat(3)*rmr0hat1(1,:) - qhat(1)*rmr0hat1(3,:)
-          qhatxrmr0hat31 = qhat(1)*rmr0hat1(2,:) - qhat(2)*rmr0hat1(1,:)
-          numerator01 = tau_ell1(1,:)*qhatxrmr0hat11 &
-                      + tau_ell1(2,:)*qhatxrmr0hat21 &
-                      + tau_ell1(3,:)*qhatxrmr0hat31
-          denominator01 = rmr0norm1*(1.0_r64 - (qhat(1)*rmr0hat1(1,:) &
-                        + qhat(2)*rmr0hat1(2,:) + qhat(3)*rmr0hat1(3,:)))
-          integrand01 = -numerator01/denominator01
-          IalphaAsvestas(j) = IalphaAsvestas(j) + sum(integrand01*w_ell1)
+          if (.not. wc1_ready) then
+            wc1(1,:) = w_ell1*(tau_ell1(2,:)*qhat(3) - tau_ell1(3,:)*qhat(2))
+            wc1(2,:) = w_ell1*(tau_ell1(3,:)*qhat(1) - tau_ell1(1,:)*qhat(3))
+            wc1(3,:) = w_ell1*(tau_ell1(1,:)*qhat(2) - tau_ell1(2,:)*qhat(1))
+            wc1_ready = .true.
+          end if
+          acc = 0.0_r64
+          do k = 1, len1nquad
+            d1 = r_ell1(1,k) - r0j(1)
+            d2 = r_ell1(2,k) - r0j(2)
+            d3 = r_ell1(3,k) - r0j(3)
+            dn = sqrt(d1*d1 + d2*d2 + d3*d3)
+            h1 = d1/dn
+            h2 = d2/dn
+            h3 = d3/dn
+            den = dn*(1.0_r64 - (qhat(1)*h1 + qhat(2)*h2 + qhat(3)*h3))
+            num = h1*wc1(1,k) + h2*wc1(2,k) + h3*wc1(3,k)
+            acc = acc - num/den
+          end do
+          IalphaAsvestas(j) = IalphaAsvestas(j) + acc
         else
-          rmr0(1,:) = x_ell - r0j(1)
-          rmr0(2,:) = y_ell - r0j(2)
-          rmr0(3,:) = z_ell - r0j(3)
-          rmr0norm = sqrt(rmr0(1,:)**2 + rmr0(2,:)**2 + rmr0(3,:)**2)
-          rmr0hat(1,:) = rmr0(1,:)/rmr0norm
-          rmr0hat(2,:) = rmr0(2,:)/rmr0norm
-          rmr0hat(3,:) = rmr0(3,:)/rmr0norm
-          qhatxrmr0hat1 = qhat(2)*rmr0hat(3,:) - qhat(3)*rmr0hat(2,:)
-          qhatxrmr0hat2 = qhat(3)*rmr0hat(1,:) - qhat(1)*rmr0hat(3,:)
-          qhatxrmr0hat3 = qhat(1)*rmr0hat(2,:) - qhat(2)*rmr0hat(1,:)
-          numerator0 = tau_ell(1,:)*qhatxrmr0hat1 &
-                     + tau_ell(2,:)*qhatxrmr0hat2 &
-                     + tau_ell(3,:)*qhatxrmr0hat3
-          denominator0 = rmr0norm*(1.0_r64 - (qhat(1)*rmr0hat(1,:) &
-                       + qhat(2)*rmr0hat(2,:) + qhat(3)*rmr0hat(3,:)))
-          integrand0 = -numerator0/denominator0
-          IalphaAsvestas(j) = IalphaAsvestas(j) + sum(integrand0*w_ell)
+          if (.not. wc0_ready) then
+            wc0(1,:) = w_ell*(tau_ell(2,:)*qhat(3) - tau_ell(3,:)*qhat(2))
+            wc0(2,:) = w_ell*(tau_ell(3,:)*qhat(1) - tau_ell(1,:)*qhat(3))
+            wc0(3,:) = w_ell*(tau_ell(1,:)*qhat(2) - tau_ell(2,:)*qhat(1))
+            wc0_ready = .true.
+          end if
+          acc = 0.0_r64
+          do k = 1, nquad
+            d1 = x_ell(k) - r0j(1)
+            d2 = y_ell(k) - r0j(2)
+            d3 = z_ell(k) - r0j(3)
+            dn = sqrt(d1*d1 + d2*d2 + d3*d3)
+            h1 = d1/dn
+            h2 = d2/dn
+            h3 = d3/dn
+            den = dn*(1.0_r64 - (qhat(1)*h1 + qhat(2)*h2 + qhat(3)*h3))
+            num = h1*wc0(1,k) + h2*wc0(2,k) + h3*wc0(3,k)
+            acc = acc - num/den
+          end do
+          IalphaAsvestas(j) = IalphaAsvestas(j) + acc
         end if
         if (LQS_PROF == 1_8) then
           call cpu_time(lqs_t1)
@@ -1170,7 +1172,7 @@ contains
         end if
       end do
     end do
-    deallocate(t_up, w_ref, r_up, rp_up, Bup)
+    deallocate(t_up, w_ref, rrp_up, Bup)
   end subroutine evaluate_solid_angle_integral_fast_r64
 
 
