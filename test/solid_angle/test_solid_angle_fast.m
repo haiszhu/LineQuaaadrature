@@ -87,7 +87,7 @@ for k=1:ntri
 
     tic
     Ia = zeros(ntc,1);
-    Ia = lqs_evaluate_solid_angle_integral_fast_mex(ntc, tcj.x, len, sjx, sjn, sjw, tri_vert(:,:,k), 3*nquad_bdry, sjxbd, Ia);
+    Ia = lqs_evaluate_solid_angle_integral_fast_driver_mex(ntc, tcj.x, len, sjx, sjn, sjw, tri_vert(:,:,k), 3*nquad_bdry, sjxbd, Ia);
     t_fast = t_fast + toc;
 
     worst_pair = max(worst_pair, max(abs(Ia - Ib)./max(abs(Ib), 1e-8)));

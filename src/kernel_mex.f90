@@ -3,6 +3,25 @@
 ! Accepts integer(8) fptr_int from MATLAB, constructs c_funptr locally,
 ! then calls lq_kernel_mod :: line_kernel_eval_r64.
 
+subroutine lqk_build_ssq_weights_mex(m, r0, rho_ssq, nbd, sxbd, sbdnp, &
+    nquad, tgl, wgl, Legmat, w1, w3, w5, troot, xroot, &
+    yroot, zroot, rfc, rfc_ssq)
+  use lq_kernel_mod, only: build_ssq_weights_r64
+  implicit none
+  integer(8), intent(in) :: m, nbd, sbdnp, nquad
+  real(8), intent(in) :: r0(3,m), rho_ssq, sxbd(3,nbd)
+  real(8), intent(in) :: tgl(nquad), wgl(nquad), Legmat(nquad,nquad)
+  real(8), intent(inout) :: w1(nquad,sbdnp,m)
+  real(8), intent(inout) :: w3(nquad,sbdnp,m)
+  real(8), intent(inout) :: w5(nquad,sbdnp,m)
+  complex(8), intent(inout) :: troot(m,sbdnp), xroot(m,sbdnp)
+  complex(8), intent(inout) :: yroot(m,sbdnp), zroot(m,sbdnp)
+  integer(8), intent(inout) :: rfc(m,sbdnp), rfc_ssq(m)
+  call build_ssq_weights_r64(m, r0, rho_ssq, nbd, sxbd, sbdnp, nquad, &
+      tgl, wgl, Legmat, w1, w3, w5, troot, xroot, yroot, zroot, rfc, &
+      rfc_ssq)
+end subroutine lqk_build_ssq_weights_mex
+
 subroutine lqk_estimate_nearroot_lengths_mex(t_root, root_imag_abs, max_len_each_side, len, lenl, lenr)
   use lq_kernel_mod, only: estimate_nearroot_lengths_r64
   implicit none

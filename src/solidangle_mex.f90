@@ -41,7 +41,7 @@ end subroutine lqe_line_integral_r128_mex
 ! Output funvals_pre(nbd, ncol, m) stores M moments only.
 ! Here ncol = 2*(order+1), matching qotential's momentsalladapt:
 ! compute full [N_0..N_{2*order+1} | M_0..M_{2*order+1}], return M.
-subroutine lqs_evaluate_solid_angle_integral_fast_mex(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+subroutine lqs_evaluate_solid_angle_integral_fast_driver_mex(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
   use solidangle_mod, only: evaluate_solid_angle_integral_fast_driver_r64
   implicit none
   integer(8), intent(in)    :: m, n, nbd
@@ -51,6 +51,38 @@ subroutine lqs_evaluate_solid_angle_integral_fast_mex(m, tx, n, sx, snx, sw, r_v
 
   call evaluate_solid_angle_integral_fast_driver_r64(m, tx, n, sx, snx, sw, r_vert, &
                                                      nbd, sxbd_in, IalphaAsvestas)
+end subroutine lqs_evaluate_solid_angle_integral_fast_driver_mex
+
+subroutine lqs_evaluate_solid_angle_integral_fast_mex(m, r0, nbd, &
+    sbdnp, nquad, sxbd, stangbd, sspbd, len1, sxbd1, stangbd1, swbd1, &
+    len2, sxbd2, stangbd2, swbd2, len3, sxbd3, stangbd3, swbd3, qhat, &
+    tgl, wgl, Dgl, w_bclag, bclagmatlr, troot, xroot, yroot, zroot, &
+    rfc, IalphaAsvestas, rho_in, sxbd_raw, tx_raw, Rfr, alpha_fr, Legmat)
+  use solidangle_mod, only: evaluate_solid_angle_integral_fast_r64
+  implicit none
+  integer(8), intent(in) :: m, nbd, sbdnp, nquad, len1, len2, len3
+  real(8), intent(in) :: r0(3,m), sxbd(3,nbd), stangbd(3,nbd)
+  real(8), intent(in) :: sspbd(nbd)
+  real(8), intent(in) :: sxbd1(3,len1*nbd), stangbd1(3,len1*nbd)
+  real(8), intent(in) :: swbd1(len1*nbd)
+  real(8), intent(in) :: sxbd2(3,len2*nbd), stangbd2(3,len2*nbd)
+  real(8), intent(in) :: swbd2(len2*nbd)
+  real(8), intent(in) :: sxbd3(3,len3*nbd), stangbd3(3,len3*nbd)
+  real(8), intent(in) :: swbd3(len3*nbd), qhat(3)
+  real(8), intent(in) :: tgl(nquad), wgl(nquad), Dgl(nquad,nquad)
+  real(8), intent(in) :: w_bclag(nquad), bclagmatlr(nquad,2)
+  complex(8), intent(in) :: troot(m,sbdnp)
+  real(8), intent(in) :: xroot(m,sbdnp), yroot(m,sbdnp), zroot(m,sbdnp)
+  integer(8), intent(inout) :: rfc(m,sbdnp)
+  real(8), intent(inout) :: IalphaAsvestas(m)
+  real(8), intent(in) :: rho_in, sxbd_raw(3,nbd), tx_raw(3,m)
+  real(8), intent(in) :: Rfr(3,3), alpha_fr, Legmat(nquad,nquad)
+
+  call evaluate_solid_angle_integral_fast_r64(m, r0, nbd, sbdnp, nquad, &
+      sxbd, stangbd, sspbd, len1, sxbd1, stangbd1, swbd1, len2, sxbd2, &
+      stangbd2, swbd2, len3, sxbd3, stangbd3, swbd3, qhat, tgl, wgl, &
+      Dgl, w_bclag, bclagmatlr, troot, xroot, yroot, zroot, rfc, &
+      IalphaAsvestas, rho_in, sxbd_raw, tx_raw, Rfr, alpha_fr, Legmat)
 end subroutine lqs_evaluate_solid_angle_integral_fast_mex
 
 ! ------------------------------------------------------------------

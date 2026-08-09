@@ -1,3 +1,33 @@
+@function [w1, w3, w5, troot, xroot, yroot, zroot, rfc, rfc_ssq] = lqk_build_ssq_weights_mex(m, r0, rho_ssq, nbd, sxbd, sbdnp, nquad, tgl, wgl, Legmat, w1, w3, w5, troot, xroot, yroot, zroot, rfc, rfc_ssq)
+m = double(m);
+nbd = double(nbd);
+sbdnp = double(sbdnp);
+nquad = double(nquad);
+rho_ssq = double(rho_ssq);
+r0 = double(reshape(r0, 3, m));
+sxbd = double(reshape(sxbd, 3, nbd));
+tgl = double(tgl(:));
+wgl = double(wgl(:));
+Legmat = double(reshape(Legmat, nquad, nquad));
+nsm = sbdnp*m;
+if nargin < 11 || isempty(w1), w1 = zeros(nquad, sbdnp, m); end
+if nargin < 12 || isempty(w3), w3 = zeros(nquad, sbdnp, m); end
+if nargin < 13 || isempty(w5), w5 = zeros(nquad, sbdnp, m); end
+if nargin < 14 || isempty(troot), troot = complex(zeros(m, sbdnp)); end
+if nargin < 15 || isempty(xroot), xroot = complex(zeros(m, sbdnp)); end
+if nargin < 16 || isempty(yroot), yroot = complex(zeros(m, sbdnp)); end
+if nargin < 17 || isempty(zroot), zroot = complex(zeros(m, sbdnp)); end
+if nargin < 18 || isempty(rfc), rfc = zeros(m, sbdnp); end
+if nargin < 19 || isempty(rfc_ssq), rfc_ssq = zeros(m, 1); end
+w1 = reshape(w1, nquad, nsm);
+w3 = reshape(w3, nquad, nsm);
+w5 = reshape(w5, nquad, nsm);
+# FORTRAN lqk_build_ssq_weights_mex(int[1] m, double[3,m] r0, double[1] rho_ssq, int[1] nbd, double[3,nbd] sxbd, int[1] sbdnp, int[1] nquad, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Legmat, inout double[nquad,nsm] w1, inout double[nquad,nsm] w3, inout double[nquad,nsm] w5, inout dcomplex[m,sbdnp] troot, inout dcomplex[m,sbdnp] xroot, inout dcomplex[m,sbdnp] yroot, inout dcomplex[m,sbdnp] zroot, inout int[m,sbdnp] rfc, inout int[m] rfc_ssq);
+w1 = reshape(w1, nquad, sbdnp, m);
+w3 = reshape(w3, nquad, sbdnp, m);
+w5 = reshape(w5, nquad, sbdnp, m);
+end
+
 % LineQuaaadrature.mw
 % mwrap interface for linequaaadrature_mod + solidangle_mod
 %
@@ -327,14 +357,59 @@ end
 # FORTRAN evaluate_solid_angle_integral(int[1] m, double[3,m] tx, int[1] n, double[3,n] sx, double[3,n] snx, double[n] sw, double[3,3] r_vert, int[1] nbd, double[3,nbd] sxbd_in, int[1] use_nearroot, inout double[m] IalphaAsvestas);
 end
 
-@function [IalphaAsvestas] = lqs_evaluate_solid_angle_integral_fast_mex(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
+@function [IalphaAsvestas] = lqs_evaluate_solid_angle_integral_fast_driver_mex(m, tx, n, sx, snx, sw, r_vert, nbd, sxbd_in, IalphaAsvestas)
 m   = double(m);
 n   = double(n);
 nbd = double(nbd);
 if nargin < 10 || isempty(IalphaAsvestas)
   IalphaAsvestas = zeros(m, 1);
 end
-# FORTRAN lqs_evaluate_solid_angle_integral_fast_mex(int[1] m, double[3,m] tx, int[1] n, double[3,n] sx, double[3,n] snx, double[n] sw, double[3,3] r_vert, int[1] nbd, double[3,nbd] sxbd_in, inout double[m] IalphaAsvestas);
+# FORTRAN lqs_evaluate_solid_angle_integral_fast_driver_mex(int[1] m, double[3,m] tx, int[1] n, double[3,n] sx, double[3,n] snx, double[n] sw, double[3,3] r_vert, int[1] nbd, double[3,nbd] sxbd_in, inout double[m] IalphaAsvestas);
+end
+
+@function [rfc, IalphaAsvestas] = lqs_evaluate_solid_angle_integral_fast_mex(m, r0, nbd, sbdnp, nquad, sxbd, stangbd, sspbd, len1, sxbd1, stangbd1, swbd1, len2, sxbd2, stangbd2, swbd2, len3, sxbd3, stangbd3, swbd3, qhat, tgl, wgl, Dgl, w_bclag, bclagmatlr, troot, xroot, yroot, zroot, rfc, IalphaAsvestas, rho_in, sxbd_raw, tx_raw, Rfr, alpha_fr, Legmat)
+m = double(m);
+nbd = double(nbd);
+sbdnp = double(sbdnp);
+nquad = double(nquad);
+len1 = double(len1);
+len2 = double(len2);
+len3 = double(len3);
+nb1 = len1*nbd;
+nb2 = len2*nbd;
+nb3 = len3*nbd;
+r0 = double(reshape(r0, 3, m));
+sxbd = double(reshape(sxbd, 3, nbd));
+stangbd = double(reshape(stangbd, 3, nbd));
+sspbd = double(sspbd(:));
+sxbd1 = double(reshape(sxbd1, 3, nb1));
+stangbd1 = double(reshape(stangbd1, 3, nb1));
+swbd1 = double(swbd1(:));
+sxbd2 = double(reshape(sxbd2, 3, nb2));
+stangbd2 = double(reshape(stangbd2, 3, nb2));
+swbd2 = double(swbd2(:));
+sxbd3 = double(reshape(sxbd3, 3, nb3));
+stangbd3 = double(reshape(stangbd3, 3, nb3));
+swbd3 = double(swbd3(:));
+qhat = double(qhat(:));
+tgl = double(tgl(:));
+wgl = double(wgl(:));
+Dgl = double(reshape(Dgl, nquad, nquad));
+w_bclag = double(w_bclag(:));
+bclagmatlr = double(reshape(bclagmatlr, nquad, 2));
+troot = double(reshape(troot, m, sbdnp));
+xroot = double(reshape(xroot, m, sbdnp));
+yroot = double(reshape(yroot, m, sbdnp));
+zroot = double(reshape(zroot, m, sbdnp));
+if nargin < 31 || isempty(rfc), rfc = zeros(m, sbdnp); end
+if nargin < 32 || isempty(IalphaAsvestas), IalphaAsvestas = zeros(m, 1); end
+rho_in = double(rho_in);
+sxbd_raw = double(reshape(sxbd_raw, 3, nbd));
+tx_raw = double(reshape(tx_raw, 3, m));
+Rfr = double(reshape(Rfr, 3, 3));
+alpha_fr = double(alpha_fr);
+Legmat = double(reshape(Legmat, nquad, nquad));
+# FORTRAN lqs_evaluate_solid_angle_integral_fast_mex(int[1] m, double[3,m] r0, int[1] nbd, int[1] sbdnp, int[1] nquad, double[3,nbd] sxbd, double[3,nbd] stangbd, double[nbd] sspbd, int[1] len1, double[3,nb1] sxbd1, double[3,nb1] stangbd1, double[nb1] swbd1, int[1] len2, double[3,nb2] sxbd2, double[3,nb2] stangbd2, double[nb2] swbd2, int[1] len3, double[3,nb3] sxbd3, double[3,nb3] stangbd3, double[nb3] swbd3, double[3] qhat, double[nquad] tgl, double[nquad] wgl, double[nquad,nquad] Dgl, double[nquad] w_bclag, double[nquad,2] bclagmatlr, dcomplex[m,sbdnp] troot, double[m,sbdnp] xroot, double[m,sbdnp] yroot, double[m,sbdnp] zroot, inout int[m,sbdnp] rfc, inout double[m] IalphaAsvestas, double[1] rho_in, double[3,nbd] sxbd_raw, double[3,m] tx_raw, double[3,3] Rfr, double[1] alpha_fr, double[nquad,nquad] Legmat);
 end
 
 
