@@ -4,7 +4,7 @@ function [u,un,unx,uny,unz] = Lap3dDLPfmm(t,s,tau,fmm_eps)
 
 % 
 srcinfo.sources = s.x;
-srcinfo.dipoles = tau'.*s.w.*s.nx; % srcinfo = rmfield(srcinfo,'charges'); if necessary
+srcinfo.dipoles = bsxfun(@times,s.nx,tau(:)'.*s.w(:)'); % srcinfo = rmfield(srcinfo,'charges'); if necessary
 targ = t.x;
 if nargin < 4, fmm_eps = 1e-15; end
 ifppreg = 0;

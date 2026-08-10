@@ -26,17 +26,18 @@ d1 = bsxfun(@minus,t.x(1,:)',s.x(1,:)); % 3 coords of displacement matrix (M*N)
 d2 = bsxfun(@minus,t.x(2,:)',s.x(2,:));
 d3 = bsxfun(@minus,t.x(3,:)',s.x(3,:));
 rr = d1.^2+d2.^2+d3.^2;   % dist^2 mat
+weights = s.w(:)';
 ny = (1/4/pi) * s.nx;     % apply prefactor here, cheaper (don't use s.nx now!)
 ddotsn = bsxfun(@times,d1,ny(1,:))+bsxfun(@times,d2,ny(2,:))+bsxfun(@times,d3,ny(3,:));  % M*N
-A =  bsxfun(@times, ddotsn ./ (sqrt(rr).*rr), s.w);  % including src quadr wei
+A =  bsxfun(@times, ddotsn ./ (sqrt(rr).*rr), weights);  % including src quadr wei
 if nargout>1                  % targ deriv wanted ... not the fastest
   ddottn = bsxfun(@times,d1,t.nx(1,:)')+bsxfun(@times,d2,t.nx(2,:)')+bsxfun(@times,d3,t.nx(3,:)');
   tndotsn = bsxfun(@times,t.nx(1,:)',ny(1,:)) + bsxfun(@times,t.nx(2,:)',ny(2,:)) + bsxfun(@times,t.nx(3,:)',ny(3,:));
-  An = bsxfun(@times, (1./(sqrt(rr).*rr)).*(-3./rr.*ddottn.*ddotsn + tndotsn), s.w);  % dipole deriv, incl src quad wei
+  An = bsxfun(@times, (1./(sqrt(rr).*rr)).*(-3./rr.*ddottn.*ddotsn + tndotsn), weights);  % dipole deriv, incl src quad wei
   if nargout>2 % to debug DLPn close eval...
-    Anx = bsxfun(@times, (1./(sqrt(rr).*rr)).*(-3./rr.*d1.*ddotsn + ny(1,:)), s.w); 
-    Any = bsxfun(@times, (1./(sqrt(rr).*rr)).*(-3./rr.*d2.*ddotsn + ny(2,:)), s.w); 
-    Anz = bsxfun(@times, (1./(sqrt(rr).*rr)).*(-3./rr.*d3.*ddotsn + ny(3,:)), s.w); 
+    Anx = bsxfun(@times, (1./(sqrt(rr).*rr)).*(-3./rr.*d1.*ddotsn + ny(1,:)), weights);
+    Any = bsxfun(@times, (1./(sqrt(rr).*rr)).*(-3./rr.*d2.*ddotsn + ny(2,:)), weights);
+    Anz = bsxfun(@times, (1./(sqrt(rr).*rr)).*(-3./rr.*d3.*ddotsn + ny(3,:)), weights);
   end
 end
 

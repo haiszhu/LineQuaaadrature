@@ -49,6 +49,40 @@ end
 %
 % ============================================================
 % New entries go below.
+@function [charts, nchart, ntri, ier] = lqsm_stellarator_mesh_init_mex(mp, np, p, nfp, nmode, mn, rc, zs, restol, cap, charts, nchart, ntri, ier)
+mp = double(mp); np = double(np); p = double(p);
+nfp = double(nfp); nmode = double(nmode); cap = double(cap);
+mn = double(reshape(mn, 2, nmode));
+rc = double(rc(:)); zs = double(zs(:)); restol = double(restol);
+charts = double(reshape(charts, 6, cap));
+nchart = double(nchart); ntri = double(ntri); ier = double(ier);
+# FORTRAN lqsm_stellarator_mesh_init_mex(int[1] mp, int[1] np, int[1] p, int[1] nfp, int[1] nmode, int[2,nmode] mn, double[nmode] rc, double[nmode] zs, double[1] restol, int[1] cap, inout double[6,cap] charts, inout int[1] nchart, inout int[1] ntri, inout int[1] ier);
+end
+
+@function [sx, snx, sw, rts, rps, ier] = lqsm_create_stellarator_tri_mesh_mex(mp, np, p, nfp, nmode, mn, rc, zs, nchart, charts, ntri, sx, snx, sw, rts, rps, ier)
+mp = double(mp); np = double(np); p = double(p);
+nfp = double(nfp); nmode = double(nmode); nchart = double(nchart);
+mn = double(reshape(mn, 2, nmode));
+rc = double(rc(:)); zs = double(zs(:));
+charts = double(reshape(charts, 6, nchart));
+ntri = double(ntri); hdim = p*(p+1)/2; nsrc = ntri*hdim;
+sx = double(reshape(sx, 3, nsrc)); snx = double(reshape(snx, 3, nsrc));
+sw = double(sw(:)); rts = double(reshape(rts, 3, nsrc));
+rps = double(reshape(rps, 3, nsrc)); ier = double(ier);
+# FORTRAN lqsm_create_stellarator_tri_mesh_mex(int[1] mp, int[1] np, int[1] p, int[1] nfp, int[1] nmode, int[2,nmode] mn, double[nmode] rc, double[nmode] zs, int[1] nchart, double[6,nchart] charts, int[1] ntri, inout double[3,nsrc] sx, inout double[3,nsrc] snx, inout double[nsrc] sw, inout double[3,nsrc] rts, inout double[3,nsrc] rps, inout int[1] ier);
+end
+
+@function [x, ier] = lqsm_stellarator_tri_uv2x_mex(mp, np, p, nfp, nmode, mn, rc, zs, nchart, charts, itri, nuv, uv, x, ier)
+mp = double(mp); np = double(np); p = double(p);
+nfp = double(nfp); nmode = double(nmode); nchart = double(nchart);
+mn = double(reshape(mn, 2, nmode));
+rc = double(rc(:)); zs = double(zs(:));
+charts = double(reshape(charts, 6, nchart));
+itri = double(itri); nuv = double(nuv); uv = double(reshape(uv, 2, nuv));
+x = double(reshape(x, 3, nuv)); ier = double(ier);
+# FORTRAN lqsm_stellarator_tri_uv2x_mex(int[1] mp, int[1] np, int[1] p, int[1] nfp, int[1] nmode, int[2,nmode] mn, double[nmode] rc, double[nmode] zs, int[1] nchart, double[6,nchart] charts, int[1] itri, int[1] nuv, double[2,nuv] uv, inout double[3,nuv] x, inout int[1] ier);
+end
+
 % --------------------------------------------------------------------------
 @function [len, lenl, lenr] = lqk_estimate_nearroot_lengths_mex(t_root, root_imag_abs, max_len_each_side, len, lenl, lenr)
 t_root = double(t_root);

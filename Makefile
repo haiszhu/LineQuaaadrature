@@ -86,6 +86,8 @@ LQ_SOURCES := $(SRC_DIR)/linequaaadrature_mod.f90 \
 			  $(SRC_DIR)/adaptive_mex.f90 \
 	              $(SRC_DIR)/solidangle_mod.f90 \
 				  $(SRC_DIR)/solidangle_mex.f90 \
+	              $(SRC_DIR)/stellarator_mesh_mod.f90 \
+	              $(SRC_DIR)/stellarator_mesh_mex.f90 \
 	              $(SRC_DIR)/ellipsoid_mesh_mod.f90 \
 	              $(SRC_DIR)/lap3d_mod.f90 \
 	              $(SRC_DIR)/lap3d_simd_mod.f90
@@ -180,6 +182,10 @@ $(BLD_DIR)/solidangle_mex.o: $(BLD_DIR)/solidangle_mod.o
 $(BLD_DIR)/kernel_mex.o: $(BLD_DIR)/kernel_mod.o $(BLD_DIR)/solidangle_mod.o
 
 $(BLD_DIR)/adaptive_mex.o: $(BLD_DIR)/adaptive_mod.o
+
+$(BLD_DIR)/stellarator_mesh_mod.o: $(BLD_DIR)/linequaaadrature_mod.o
+
+$(BLD_DIR)/stellarator_mesh_mex.o: $(BLD_DIR)/stellarator_mesh_mod.o
 
 # note: module files (.mod) are emitted to BLD_DIR via -J flag
 # TODO: add -J$(BLD_DIR) once modules are non-empty
