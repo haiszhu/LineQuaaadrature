@@ -83,6 +83,18 @@ x = double(reshape(x, 3, nuv)); ier = double(ier);
 # FORTRAN lqsm_stellarator_tri_uv2x_mex(int[1] mp, int[1] np, int[1] p, int[1] nfp, int[1] nmode, int[2,nmode] mn, double[nmode] rc, double[nmode] zs, int[1] nchart, double[6,nchart] charts, int[1] itri, int[1] nuv, double[2,nuv] uv, inout double[3,nuv] x, inout int[1] ier);
 end
 
+@function [sx, snx, sw, rts, rps, ier] = lqtm_create_torus_tri_mesh_mex(mp, np, p, radii, scales, nosc, orig, ntri, sx, snx, sw, rts, rps, ier)
+mp = double(mp); np = double(np); p = double(p);
+radii = double(reshape(radii, 3, 1));
+scales = double(reshape(scales, 3, 1));
+nosc = double(nosc); orig = double(orig); ntri = double(ntri);
+hdim = p*(p+1)/2; nsrc = ntri*hdim;
+sx = double(reshape(sx, 3, nsrc)); snx = double(reshape(snx, 3, nsrc));
+sw = double(sw(:)); rts = double(reshape(rts, 3, nsrc));
+rps = double(reshape(rps, 3, nsrc)); ier = double(ier);
+# FORTRAN lqtm_create_torus_tri_mesh_mex(int[1] mp, int[1] np, int[1] p, double[3] radii, double[3] scales, int[1] nosc, int[1] orig, int[1] ntri, inout double[3,nsrc] sx, inout double[3,nsrc] snx, inout double[nsrc] sw, inout double[3,nsrc] rts, inout double[3,nsrc] rps, inout int[1] ier);
+end
+
 % --------------------------------------------------------------------------
 @function [len, lenl, lenr] = lqk_estimate_nearroot_lengths_mex(t_root, root_imag_abs, max_len_each_side, len, lenl, lenr)
 t_root = double(t_root);
@@ -561,4 +573,3 @@ end
 # FORTRAN lqs_eval_moments_funvals_mex(int[1] m, double[3,m] tx, int[1] nbd, double[3,nbd] sxbd, int[1] nquad, int[1] order, int[1] ncol, inout double[nbdncol,m] funvals_pre);
 funvals_pre = double(reshape(funvals_pre, [nbd, ncol, m]));
 end
-

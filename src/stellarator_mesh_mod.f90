@@ -16,6 +16,7 @@ module stellarator_mesh_mod
   public :: create_stellarator_tri_mesh_r64
   public :: stellarator_tri_uv2x_r64
   public :: get_w7x_modes_r64
+  public :: get_vr_nodes_wts_r64
 
 contains
 
