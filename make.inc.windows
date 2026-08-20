@@ -1,0 +1,25 @@
+# Windows toolchain defaults. Override paths on the make command line.
+MATLABROOT ?= C:/Program Files/MATLAB/R2024b
+MINGWROOT ?= C:/ProgramData/MATLAB/SupportPackages/R2024b/3P.instrset/mingw_w64.instrset
+HDF5_ROOT ?= C:/Users/Hai/scoop/apps/octave/9.4.0/mingw64
+
+FC := $(MINGWROOT)/bin/gfortran.exe
+CC := $(MINGWROOT)/bin/gcc.exe
+AR := $(MINGWROOT)/bin/ar.exe
+MEX := $(MATLABROOT)/bin/win64/mex.exe
+MATLAB := $(MATLABROOT)/bin/matlab.exe
+
+MINGW_LPATH := $(MINGWROOT)/lib/gcc/x86_64-w64-mingw32/8.1.0
+MATLAB_LPATH := $(MATLABROOT)/extern/lib/win64/mingw64
+HDF5_INCLUDE := $(HDF5_ROOT)/include
+HDF5_LPATH := $(HDF5_ROOT)/lib
+HDF5_BIN := $(HDF5_ROOT)/bin
+HDF5_IMPORT := $(HDF5_LPATH)/libhdf5.dll.a
+
+FFLAGS ?= -g -O3 -ffp-contract=off -fno-unsafe-math-optimizations \
+          -std=legacy -w -fdefault-integer-8 -frecursive -cpp \
+          -march=native -funroll-loops -fopenmp
+CFLAGS ?= -O3 -DH5_BUILT_AS_DYNAMIC_LIB
+SIMD_CFLAGS ?= -O3 -march=native -ffp-contract=off \
+               -Werror=implicit-function-declaration
+MEXFLAGS ?= -v -R2018a -DMWF77_UNDERSCORE1

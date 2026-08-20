@@ -1,0 +1,108 @@
+include make.inc.windows
+
+.DEFAULT_GOAL := all
+
+ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+ROOT := $(patsubst %/,%,$(ROOT))
+SRC_DIR := $(ROOT)/src
+MATLAB_DIR := $(ROOT)/matlab
+TEST_DIR := $(ROOT)/test
+BLD_DIR := $(ROOT)/build-windows
+
+LQ_SOURCES := $(SRC_DIR)/linequaaadrature_mod.f90 \
+              $(SRC_DIR)/linequaaadrature_mex.f90 \
+              $(SRC_DIR)/koorn_geom_mod.f90 \
+              $(SRC_DIR)/kernel_mod.f90 \
+              $(SRC_DIR)/kernel_mex.f90 \
+              $(SRC_DIR)/adaptive_mod.f90 \
+              $(SRC_DIR)/adaptive_mex.f90 \
+              $(SRC_DIR)/solidangle_mod.f90 \
+              $(SRC_DIR)/solidangle_mex.f90 \
+              $(SRC_DIR)/stellarator_mesh_mod.f90 \
+              $(SRC_DIR)/stellarator_mesh_mex.f90 \
+              $(SRC_DIR)/torus_mesh_mod.f90 \
+              $(SRC_DIR)/torus_mesh_mex.f90 \
+              $(SRC_DIR)/ellipsoid_mesh_mod.f90 \
+              $(SRC_DIR)/lap3d_mod.f90 \
+              $(SRC_DIR)/lap3d_simd_mod.f90
+LQ_OBJECTS := $(patsubst $(SRC_DIR)/%.f90,$(BLD_DIR)/%.o,$(LQ_SOURCES)) \
+              $(BLD_DIR)/hdf5_io.o $(BLD_DIR)/lap3d_simd.o
+
+STATIC_LIBRARY := $(BLD_DIR)/libLineQuaaadrature.a
+MEX_SOURCE := $(MATLAB_DIR)/LineQuaaadrature_mex.c
+MEX_FILE := $(MATLAB_DIR)/LineQuaaadrature_mex.mexw64
+HDF5_RUNTIME_NAMES := libhdf5.dll libwinpthread-1.dll libz.dll
+HDF5_RUNTIMES := $(addprefix $(MATLAB_DIR)/,$(HDF5_RUNTIME_NAMES))
+
+.PHONY: all lib mex validate test clean
+
+all: mex
+
+lib: validate $(STATIC_LIBRARY)
+
+mex: validate $(MEX_FILE) $(HDF5_RUNTIMES)
+
+validate:
+	@test -f "$(FC)" || { echo "Missing Fortran compiler: $(FC)"; exit 1; }
+	@test -f "$(CC)" || { echo "Missing C compiler: $(CC)"; exit 1; }
+	@test -f "$(AR)" || { echo "Missing archiver: $(AR)"; exit 1; }
+	@test -f "$(MEX)" || { echo "Missing MATLAB MEX driver: $(MEX)"; exit 1; }
+	@test -f "$(MATLAB)" || { echo "Missing MATLAB executable: $(MATLAB)"; exit 1; }
+	@test -f "$(HDF5_INCLUDE)/hdf5.h" || { echo "Missing HDF5 header: $(HDF5_INCLUDE)/hdf5.h"; exit 1; }
+	@test -f "$(HDF5_IMPORT)" || { echo "Missing HDF5 import library: $(HDF5_IMPORT)"; exit 1; }
+	@for dll in $(HDF5_RUNTIME_NAMES); do \
+	  test -f "$(HDF5_BIN)/$$dll" || { echo "Missing HDF5 runtime: $(HDF5_BIN)/$$dll"; exit 1; }; \
+	done
+
+$(BLD_DIR):
+	mkdir -p "$@"
+
+$(BLD_DIR)/%.o: $(SRC_DIR)/%.f90 | $(BLD_DIR)
+	"$(FC)" $(FFLAGS) -J"$(BLD_DIR)" -I"$(BLD_DIR)" -I"$(SRC_DIR)" -c "$<" -o "$@"
+
+$(BLD_DIR)/hdf5_io.o: $(SRC_DIR)/hdf5_io.c | $(BLD_DIR)
+	"$(CC)" $(CFLAGS) -I"$(HDF5_INCLUDE)" -c "$<" -o "$@"
+
+$(BLD_DIR)/lap3d_simd.o: $(SRC_DIR)/lap3d_simd.c | $(BLD_DIR)
+	"$(CC)" $(SIMD_CFLAGS) -c "$<" -o "$@"
+
+$(BLD_DIR)/lap3d_simd_mod.o: $(BLD_DIR)/linequaaadrature_mod.o
+$(BLD_DIR)/kernel_mod.o: $(BLD_DIR)/linequaaadrature_mod.o
+$(BLD_DIR)/adaptive_mod.o: $(BLD_DIR)/linequaaadrature_mod.o
+$(BLD_DIR)/solidangle_mod.o: $(BLD_DIR)/linequaaadrature_mod.o \
+                              $(BLD_DIR)/koorn_geom_mod.o \
+                              $(BLD_DIR)/kernel_mod.o \
+                              $(BLD_DIR)/adaptive_mod.o
+$(BLD_DIR)/linequaaadrature_mex.o: $(BLD_DIR)/linequaaadrature_mod.o \
+                                   $(BLD_DIR)/adaptive_mod.o \
+                                   $(BLD_DIR)/solidangle_mod.o \
+                                   $(BLD_DIR)/ellipsoid_mesh_mod.o
+$(BLD_DIR)/solidangle_mex.o: $(BLD_DIR)/solidangle_mod.o
+$(BLD_DIR)/kernel_mex.o: $(BLD_DIR)/kernel_mod.o $(BLD_DIR)/solidangle_mod.o
+$(BLD_DIR)/adaptive_mex.o: $(BLD_DIR)/adaptive_mod.o
+$(BLD_DIR)/stellarator_mesh_mod.o: $(BLD_DIR)/linequaaadrature_mod.o
+$(BLD_DIR)/stellarator_mesh_mex.o: $(BLD_DIR)/stellarator_mesh_mod.o
+$(BLD_DIR)/torus_mesh_mod.o: $(BLD_DIR)/linequaaadrature_mod.o \
+                              $(BLD_DIR)/stellarator_mesh_mod.o
+$(BLD_DIR)/torus_mesh_mex.o: $(BLD_DIR)/torus_mesh_mod.o
+
+$(STATIC_LIBRARY): $(LQ_OBJECTS)
+	"$(AR)" rcs "$@" $(LQ_OBJECTS)
+
+$(MEX_FILE): $(STATIC_LIBRARY) $(MEX_SOURCE)
+	MW_MINGW64_LOC="$(MINGWROOT)" "$(MEX)" $(MEXFLAGS) \
+	  -output "$(MATLAB_DIR)/LineQuaaadrature_mex" \
+	  "$(MEX_SOURCE)" "$(STATIC_LIBRARY)" \
+	  "$(HDF5_IMPORT)" \
+	  -L"$(MINGW_LPATH)" -lgfortran -lquadmath -lgomp \
+	  -L"$(MATLAB_LPATH)" -lmwblas -lmwlapack
+
+$(MATLAB_DIR)/%.dll: $(HDF5_BIN)/%.dll
+	cp "$<" "$@"
+
+test: mex
+	"$(MATLAB)" -batch "cd('$(ROOT)'); addpath('test'); linequaaadrature_windows_mex_smoke"
+
+clean:
+	rm -rf "$(BLD_DIR)" "$(MEX_FILE)" $(HDF5_RUNTIMES)
+

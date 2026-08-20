@@ -3,6 +3,7 @@
 
 # build outputs
 build/
+build-windows/
 
 # Fortran artifacts
 *.o
@@ -11,5 +12,8 @@ build/
 
 # MATLAB MEX binaries
 *.mex*
+matlab/libhdf5.dll
+matlab/libwinpthread-1.dll
+matlab/libz.dll
 
 *.bak*

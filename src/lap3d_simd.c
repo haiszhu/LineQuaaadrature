@@ -2,6 +2,15 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#if defined(_WIN32)
+  #include <malloc.h>
+  #define LQ_ALIGNED_ALLOC(align, size) _aligned_malloc((size), (align))
+  #define LQ_ALIGNED_FREE(ptr) _aligned_free(ptr)
+#else
+  #define LQ_ALIGNED_ALLOC(align, size) aligned_alloc((align), (size))
+  #define LQ_ALIGNED_FREE(ptr) free(ptr)
+#endif
+
 #if defined(__arm__) || defined(__aarch64__)
   #define LQ_ARCH_ARM
 #elif defined(__x86_64__) || defined(_M_X64)
@@ -50,7 +59,7 @@ static double *lq_soa_alloc(int64_t mv, size_t align, const double *r0,
     double *buf;
     int64_t i;
     if (mv <= 0) { *r0x = *r0y = *r0z = NULL;  return NULL; }
-    buf = (double*)aligned_alloc(align, 3*mv*sizeof(double));
+    buf = (double*)LQ_ALIGNED_ALLOC(align, 3*mv*sizeof(double));
     *r0x = buf;  *r0y = buf + mv;  *r0z = buf + 2*mv;
     for (i = 0; i < mv; ++i) {
         (*r0x)[i] = r0[3*i];  (*r0y)[i] = r0[3*i+1];  (*r0z)[i] = r0[3*i+2];
@@ -103,7 +112,7 @@ void lq_csimd128lap3dsdlpmat_c_(int64_t *M, const double *r0, int64_t *N,
         }
     }
     lq_sdlp_scalar(m, r0, n, r, rn, w, As, Ad, m2);
-    free(buf);
+    LQ_ALIGNED_FREE(buf);
 #else
     lq_sdlp_scalar(*M, r0, *N, r, rn, w, As, Ad, 0);
 #endif
@@ -161,7 +170,7 @@ void lq_csimd256lap3dsdlpmat_c_(int64_t *M, const double *r0, int64_t *N,
         }
     }
     lq_sdlp_scalar(m, r0, n, r, rn, w, As, Ad, m4);
-    free(buf);
+    LQ_ALIGNED_FREE(buf);
 #else
     lq_sdlp_scalar(*M, r0, *N, r, rn, w, As, Ad, 0);
 #endif
@@ -220,7 +229,7 @@ void lq_csimd512lap3dsdlpmat_c_(int64_t *M, const double *r0, int64_t *N,
         }
     }
     lq_sdlp_scalar(m, r0, n, r, rn, w, As, Ad, m8);
-    free(buf);
+    LQ_ALIGNED_FREE(buf);
 #else
     lq_sdlp_scalar(*M, r0, *N, r, rn, w, As, Ad, 0);
 #endif

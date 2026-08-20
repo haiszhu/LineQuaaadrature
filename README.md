@@ -29,6 +29,43 @@ This builds:
 - static library: `build/libLineQuaaadrature.a`
 - MATLAB MEX: `matlab/LineQuaaadrature_mex.mexmaca64` (on Apple Silicon macOS)
 
+### Windows
+
+MATLAB R2024a or later is required for MinGW Fortran MEX support. In
+MATLAB's Add-On Explorer, install **MATLAB Support for MinGW-w64
+C/C++/Fortran Compiler**, then configure both compilers:
+
+```matlab
+mex -setup C
+mex -setup FORTRAN
+```
+
+The HDF5-enabled build also requires an HDF5 development installation
+containing `include/hdf5.h`, `lib/libhdf5.dll.a`, and
+`bin/libhdf5.dll`. Build and test from PowerShell with:
+
+```powershell
+make -f makefile.windows
+make -f makefile.windows test
+```
+
+The Windows build stages the HDF5 runtime DLLs beside the MEX file so it
+can be loaded from an ordinary MATLAB session without changing `PATH`.
+Defaults target MATLAB R2024b, its bundled MinGW toolchain, and the HDF5
+development files bundled with the local Octave installation. Override
+any location when needed:
+
+```powershell
+make -f makefile.windows MATLABROOT="D:/MATLAB/R2024b" `
+    MINGWROOT="D:/MathWorks/MinGW" HDF5_ROOT="D:/Libraries/hdf5"
+```
+
+Remove generated Windows products with:
+
+```powershell
+make -f makefile.windows clean
+```
+
 ## Run Fortran Tests
 ### Real64 test
 ```bash
